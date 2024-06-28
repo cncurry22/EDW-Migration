@@ -1,0 +1,826 @@
+import pandas as pd
+import sklearn as sk
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
+import numpy as np
+import domojupyter as domo
+import matplotlib.pyplot as plt
+from sklearn.pipeline import Pipeline, FeatureUnion
+from sklearn.decomposition import PCA
+
+pd.set_option('display.max_columns', None)
+
+df = domo.read_dataframe('DEVVwCollegeHouseBedBathLeasingAndRatesforAnalysis', query='SELECT * FROM table')
+
+df['year'] = df['asofdate'].dt.year
+df['month'] = df['asofdate'].dt.month
+df['day'] = df['asofdate'].dt.day
+df['semester'] = df['month'].apply(lambda x: 'Spring' if x < 6 else ('Summer' if x < 9 else 'Fall'))
+df['daysleftinschoolyear'] = (df['academicyearenddate'] - df['asofdate']).dt.days
+
+df = df.dropna()
+df['asofdate'] = pd.to_datetime(df['asofdate'])
+
+df = df.drop(['asofdate', 'academicyearbegindate', 'academicyearenddate'], axis=1)
+
+# Preprocessing steps
+numerical_features = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
+categorical_features = df.select_dtypes(include=['object', 'category']).columns.tolist()
+
+# Identify numerical and categorical features, explicitly excluding 'beds', 'baths', and 'subjectprelease'
+numerical_features = [col for col in df.columns if df[col].dtype in ['int64', 'float64'] 
+                      and col not in ['subjectprelease', 'beds', 'baths']]
+categorical_features = [col for col in df.columns if df[col].dtype == 'object' or 
+                        col in ['beds', 'baths']]
+
+# Split data into features and target
+X = df.drop(['subjectprelease'], axis=1)
+y = df['subjectprelease']
+
+# Split data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# Define the numerical pipeline
+numerical_pipeline = Pipeline([
+    ('scaler', StandardScaler())
+])
+
+# Define the full preprocessing pipeline, which includes the numerical and categorical transformations
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', numerical_pipeline, numerical_features),
+        ('cat', OneHotEncoder(drop='first'), categorical_features)
+    ])
+from sklearn.model_selection import GridSearchCV
+# from sklearn.model_selection import RandomizedSearchCV
+
+param_grid = {
+    'regressor__n_estimators': [10, 50, 100, 200],
+    'regressor__max_depth': [None, 10, 20, 30],
+    'regressor__min_samples_split': [2, 5, 10],
+    'regressor__min_samples_leaf': [1, 2, 4]
+}
+# Define the full pipeline with preprocessing and the regressor
+pipeline = Pipeline(steps=[
+    ('preprocessor', preprocessor),
+    ('regressor', RandomForestRegressor(random_state=42))
+])
+
+# Instantiate the grid search model
+grid_search = GridSearchCV(estimator=pipeline, param_grid=param_grid, 
+                           cv=5, n_jobs=-1, scoring='neg_mean_squared_error', verbose=1)
+
+# Fit the grid search to the data
+grid_search.fit(X_train, y_train)
+
+# Get the best parameters
+best_params = grid_search.best_params_
+print(f"Best parameters: {best_params}")
+
+# Get the best estimator
+best_model = grid_search.best_estimator_
+
+# Evaluate on the test set
+y_pred = best_model.predict(X_test)
+mse = mean_squared_error(y_test, y_pred)
+print(f"Mean Squared Error: {mse}")
+
+# Fit the pipeline on the training data
+# pipeline.fit(X_train, y_train)
+
+# Evaluate the model on the test data
+# y_pred = pipeline.predict(X_test)
+# mse = mean_squared_error(y_test, y_pred)
+# print(f'Mean Squared Error: {mse}')
+Fitting 5 folds for each of 144 candidates, totalling 720 fits
+# GridSearchCV results
+cv_results = pd.DataFrame(grid_search.cv_results_)
+print(cv_results[['param_regressor__n_estimators', 'param_regressor__max_depth', 
+                  'mean_test_score', 'rank_test_score']].sort_values('rank_test_score').head())
+# Assessing overfitting by comparing training and test performance
+train_preds = pipeline.predict(X_train)
+test_preds = pipeline.predict(X_test)
+
+train_mse = mean_squared_error(y_train, train_preds)
+test_mse = mean_squared_error(y_test, test_preds)
+
+print(f'Train MSE: {train_mse}')
+print(f'Test MSE: {test_mse}')
+Train MSE: 0.00011208557523911273
+Test MSE: 0.000733034356528483
+from sklearn.model_selection import validation_curve
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.datasets import make_regression
+
+# Example dataset
+X, y = make_regression(n_samples=1000, n_features=20, noise=0.1, random_state=42)
+
+# Range of hyperparameter values (for max_depth in this example)
+param_range = np.arange(1, 11)
+
+# Calculate scores for varying values of max_depth
+train_scores, test_scores = validation_curve(
+    RandomForestRegressor(),
+    X, y, 
+    param_name="max_depth",
+    param_range=param_range,
+    cv=5, 
+    scoring="neg_mean_squared_error",
+    n_jobs=-1)
+
+# Calculate mean and standard deviation for training set scores
+train_mean = np.mean(-train_scores, axis=1)
+train_std = np.std(-train_scores, axis=1)
+
+# Calculate mean and standard deviation for test set (validation) scores
+test_mean = np.mean(-test_scores, axis=1)
+test_std = np.std(-test_scores, axis=1)
+
+# Plot mean error for training and test scores
+plt.plot(param_range, train_mean, label="Training score", color="r")
+plt.plot(param_range, test_mean, label="Cross-validation score", color="g")
+
+# Plot the std deviation as shaded area
+plt.fill_between(param_range, train_mean - train_std, train_mean + train_std, color="r", alpha=0.2)
+plt.fill_between(param_range, test_mean - test_std, test_mean + test_std, color="g", alpha=0.2)
+
+plt.title("Validation Curve with RandomForestRegressor")
+plt.xlabel("max_depth")
+plt.ylabel("Mean Squared Error")
+plt.tight_layout()
+plt.legend(loc="best")
+plt.show()
+No description has been provided for this image
+from sklearn.model_selection import cross_val_score
+
+# Cross-validation scores
+scores = cross_val_score(pipeline, X_train, y_train, cv=5, scoring='neg_mean_squared_error')
+
+print(f'CV MSE scores: {-scores}')
+print(f'CV MSE mean: {-np.mean(scores)}')
+print(f'CV MSE std deviation: {np.std(scores)}')
+CV MSE scores: [0.00111012 0.00107083 0.00084904 0.00096592 0.00114995]
+CV MSE mean: 0.001029172625255143
+CV MSE std deviation: 0.0001089264493015577
+from sklearn.model_selection import learning_curve
+
+train_sizes, train_scores, validation_scores = learning_curve(
+    estimator = pipeline,
+    X = X_train,
+    y = y_train,
+    train_sizes = np.linspace(0.1, 1.0, 10),
+    cv = 5,
+    scoring = 'neg_mean_squared_error'
+)
+
+train_scores_mean = -train_scores.mean(axis=1)
+validation_scores_mean = -validation_scores.mean(axis=1)
+
+plt.plot(train_sizes, train_scores_mean, 'o-', color="r", label="Training score")
+plt.plot(train_sizes, validation_scores_mean, 'o-', color="g", label="Cross-validation score")
+plt.title("Learning Curve")
+plt.xlabel("Training Set Size"), plt.ylabel("MSE"), plt.legend(loc="best")
+plt.show()
+# Calculate the correlation matrix
+corr_matrix = X_train.corr()
+
+# Display the correlation matrix (potentially as a heatmap)
+import seaborn as sns
+
+sns.heatmap(corr_matrix, annot=True, cmap='coolwarm')
+plt.show()
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+# Compute VIF for each feature
+vif_data = pd.DataFrame()
+vif_data['feature'] = X_train.columns
+
+# Here, X_train should be a dataframe containing all the numeric features after any preprocessing that converts them to numeric
+vif_data['VIF'] = [variance_inflation_factor(X_train.values, i)
+                   for i in range(len(X_train.columns))]
+
+print(vif_data)
+Using Feature Importance to Remove Unecessary Features
+# Get feature importances
+importances = pipeline.named_steps['regressor'].feature_importances_
+
+# Get feature names from the preprocessor
+feature_names = preprocessor.get_feature_names_out()
+
+# Create a DataFrame to display feature importances
+feature_importances_df = pd.DataFrame({
+    'Feature': feature_names,
+    'Importance': importances
+}).sort_values(by='Importance', ascending=False).reset_index(drop=True)
+
+print(feature_importances_df)
+                                           Feature    Importance
+0                 num__yearlysubjectpreleasechange  4.583223e-01
+1                        num__daysleftinschoolyear  1.516291e-01
+2                            num__target occupancy  1.037430e-01
+3                               num__ytdsignedrent  4.979124e-02
+4                     num__yearlysubjectratechange  3.706985e-02
+..                                             ...           ...
+210                              cat__city_madison  1.929668e-07
+211            cat__subjectcommunity_VERVE Madison  1.915845e-07
+212  cat__college_University of Wisconsin, Madison  1.621516e-07
+213                         cat__city_stephenville  5.890463e-08
+214         cat__college_Tarleton State University  2.969584e-08
+
+[215 rows x 2 columns]
+# Decide on a threshold or select top N features
+selected_features = feature_importances_df[feature_importances_df['Importance'] > threshold]['Feature']
+
+# Filter the training and test sets for the selected features
+X_train_selected = X_train[selected_features]
+X_test_selected = X_test[selected_features]
+---------------------------------------------------------------------------
+NameError                                 Traceback (most recent call last)
+Cell In[9], line 2
+      1 # Decide on a threshold or select top N features
+----> 2 selected_features = feature_importances_df[feature_importances_df['Importance'] > threshold]['Feature']
+      4 # Filter the training and test sets for the selected features
+      5 X_train_selected = X_train[selected_features]
+
+NameError: name 'threshold' is not defined
+# Retrain the model with only the selected features
+regressor = RandomForestRegressor(random_state=42)
+regressor.fit(X_train_selected, y_train)
+
+# Make predictions and evaluate the model
+y_pred_selected = regressor.predict(X_test_selected)
+mse_selected = mean_squared_error(y_test, y_pred_selected)
+print(f'Mean Squared Error with Selected Features: {mse_selected}')
+Clustering: Use clustering techniques to identify latent groups within the colleges or regions which might have similar rental patterns.
+# from sklearn.cluster import KMeans
+
+# # Fit and transform the data
+# X_processed = preprocessor.fit_transform(df)
+
+# # Apply K-means clustering on the processed data
+# k = 4  # Optimal number of clusters found through methods like the Elbow method
+# kmeans = KMeans(n_clusters=k, random_state=42)
+# clusters = kmeans.fit_predict(X_processed)
+
+# # Add cluster assignments back to the original DataFrame
+# df['cluster'] = clusters
+# import matplotlib.pyplot as plt
+
+# inertia = []
+# for k in range(1, 10):  # Adjust the range of k as necessary
+#     kmeans = KMeans(n_clusters=k, random_state=42)
+#     kmeans.fit(X_processed)  # Use the transformed data here
+#     inertia.append(kmeans.inertia_)
+
+# plt.figure(figsize=(10, 6))
+# plt.plot(range(1, 10), inertia, marker='o')  # Adjust the range of k accordingly
+# plt.title('Elbow Method')
+# plt.xlabel('Number of clusters')
+# plt.ylabel('Inertia')
+# plt.show()
+No description has been provided for this image
+import matplotlib.pyplot as plt
+
+inertia = []
+for k in range(1, 10):  # Adjust the range of k as necessary
+    kmeans = KMeans(n_clusters=k, random_state=42)
+    kmeans.fit(features_scaled)
+    inertia.append(kmeans.inertia_)
+
+plt.figure(figsize=(10, 6))
+plt.plot(range(1, 10), inertia, marker='o')  # Adjust the range of k accordingly
+plt.title('Elbow Method')
+plt.xlabel('Number of clusters')
+plt.ylabel('Inertia')
+plt.show()
+---------------------------------------------------------------------------
+NameError                                 Traceback (most recent call last)
+Cell In[104], line 6
+      4 for k in range(1, 10):  # Adjust the range of k as necessary
+      5     kmeans = KMeans(n_clusters=k, random_state=42)
+----> 6     kmeans.fit(features_scaled)
+      7     inertia.append(kmeans.inertia_)
+      9 plt.figure(figsize=(10, 6))
+
+NameError: name 'features_scaled' is not defined
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+
+# Assume X_train, y_train are prepared
+model = GradientBoostingRegressor()
+
+# Define parameter grid
+param_grid = {
+    'n_estimators': [100, 200],
+    'learning_rate': [0.1, 0.01],
+    'max_depth': [3, 4, 5]
+}
+
+# Time Series Cross-validation
+tscv = TimeSeriesSplit(n_splits=5)
+
+# Grid search with CV
+grid_search = GridSearchCV(model, param_grid, cv=tscv, scoring='neg_mean_squared_error')
+grid_search.fit(X_train, y_train)
+
+# Best model
+best_model = grid_search.best_estimator_
+RMSE: 183.13664492118298
+# Set the pandas display options to show all columns
+pd.set_option('display.max_columns', None)
+
+# Now, when you use the head() function, all columns will be displayed
+df.head(20)
+asofdate	college	academicyearbegindate	academicyearenddate	weeksleftinacademicyear	collegeoncampushousing	collegeoffcampushousing	region	state	city	subjectcommunity	target occupancy	target rent revenue	ytdsignedrent	beds	baths	marketproximity	marketvintage	marketsqft	marketrate	weeklymarketratechange	yearlymarketratechange	minmarketrate	maxmarketrate	marketprelease	weeklymarketpreleasechange	yearlymarketpreleasechange	yearlymarketoccupancychange	marketoccupancy	subjectproximity	subjectrate	weeklysubjectratechange	yearlysubjectratechange	subjectvintage	subjectsqft	totalsubjectbeds	subjectprelease	weeklysubjectpreleasechange	yearlysubjectpreleasechange	year	month	day	semester	daysleftinschoolyear
+4	2024-03-25	Iowa State University	2023-09-18	2024-09-15	25	0.29	0.71	Midwest	ia	ames	Copper Beech at Ames	0.961100	417399.73	132670.0	3	3.0	1.98250	2011	1341	633.798165	0.424266	0.198106	515.0	750.0	0.76356	0.9233	-0.1302	0.0211	0.96702	1.88	590.000000	0.0	0.000000	2016	2000	24	0.70830	0.0000	0.6997	2024	3	25	Spring	174
+5	2024-03-25	Iowa State University	2023-09-18	2024-09-15	25	0.29	0.71	Midwest	ia	ames	Copper Beech at Ames	0.961100	417399.73	132670.0	3	3.0	2.69000	2005	1342	445.000000	-0.297884	-0.290028	445.0	445.0	0.39700	-0.4800	-0.4042	-0.0368	0.94400	1.88	590.000000	0.0	0.000000	2016	2000	24	0.70830	0.0000	0.6997	2024	3	25	Spring	174
+6	2024-03-25	Iowa State University	2023-09-18	2024-09-15	25	0.29	0.71	Midwest	ia	ames	Copper Beech at Ames	0.961100	417399.73	132670.0	3	3.5	1.98250	2011	1341	633.798165	0.424266	0.157592	515.0	750.0	0.76356	0.9233	1.5140	0.0495	0.96702	1.88	675.000000	0.0	0.015038	2016	2000	270	0.72590	0.0000	0.4960	2024	3	25	Spring	174
+7	2024-03-25	Iowa State University	2023-09-18	2024-09-15	25	0.29	0.71	Midwest	ia	ames	Copper Beech at Ames	0.961100	417399.73	132670.0	3	3.5	2.69000	2005	1342	445.000000	-0.162105	-0.095998	445.0	445.0	0.39700	-0.5726	-0.1996	-0.0031	0.94400	1.88	675.000000	0.0	0.015038	2016	2000	270	0.72590	0.0051	0.4960	2024	3	25	Spring	174
+8	2024-03-25	Iowa State University	2023-09-18	2024-09-15	25	0.29	0.71	Midwest	ia	ames	Copper Beech at Ames	0.961100	417399.73	24205.0	1	1.0	2.37857	2006	605	955.000000	-0.054663	0.002392	875.0	1345.0	1.00000	0.2018	0.1428	0.0228	1.00000	1.88	1130.000000	0.0	0.041475	2016	650	24	0.87500	0.0000	0.0500	2024	3	25	Spring	174
+18	2024-03-25	Georgia Institute of Technology	2023-09-18	2024-09-15	25	0.36	0.64	Southeast	ga	atlanta	Westmar Student Lofts	0.951638	1213351.00	57134.0	2	2.0	0.51560	2012	951	1487.812500	0.000000	0.196010	1004.0	1709.0	0.62418	0.0000	1.4025	0.0327	0.99732	0.98	1116.192308	0.0	-0.042875	2005	900	260	0.18076	0.0000	0.8799	2024	3	25	Spring	174
+19	2024-03-25	Georgia Institute of Technology	2023-09-18	2024-09-15	25	0.36	0.64	Southeast	ga	atlanta	Westmar Student Lofts	0.951638	1213351.00	57134.0	2	2.0	0.51560	2012	951	1487.812500	0.196010	-0.006423	1004.0	1709.0	0.62418	0.5917	0.8141	0.0293	0.99732	0.98	1116.192308	0.0	-0.042875	2005	900	260	0.18076	0.0000	0.8799	2024	3	25	Spring	174
+20	2024-03-25	Georgia Institute of Technology	2023-09-18	2024-09-15	25	0.36	0.64	Southeast	ga	atlanta	Westmar Student Lofts	0.951638	1213351.00	57134.0	2	2.0	0.51666	1983	810	1243.980392	0.000000	-0.169257	875.0	1675.0	0.39214	0.0000	0.1397	-0.0033	0.96568	0.98	1116.192308	0.0	-0.042875	2005	900	260	0.18076	0.0000	0.8799	2024	3	25	Spring	174
+21	2024-03-25	Georgia Institute of Technology	2023-09-18	2024-09-15	25	0.36	0.64	Southeast	ga	atlanta	Westmar Student Lofts	0.951638	1213351.00	57134.0	2	2.0	0.51666	1983	810	1243.980392	-0.163886	0.000000	875.0	1675.0	0.39214	-0.3717	0.3333	0.0000	0.96568	0.98	1116.192308	0.0	-0.042875	2005	900	260	0.18076	0.0929	0.8799	2024	3	25	Spring	174
+24	2024-03-25	Auburn University	2023-09-18	2024-09-15	25	0.15	0.85	Southeast	al	auburn	Grove at Auburn	0.976455	461459.80	379340.0	3	3.0	70.80000	2023	71	779.285714	-0.215562	0.164852	775.0	785.0	0.58332	-0.2468	1.0597	0.1759	0.88092	1.05	653.333333	0.0	0.000000	2012	1225	504	1.00000	0.0000	0.0327	2024	3	25	Spring	174
+25	2024-03-25	Auburn University	2023-09-18	2024-09-15	25	0.15	0.85	Southeast	al	auburn	Grove at Auburn	0.976455	461459.80	379340.0	3	3.0	1.39090	2014	1400	993.432343	-0.211562	-0.211562	595.0	1260.0	0.77451	-0.0705	0.0326	-0.0432	0.95672	1.05	653.333333	0.0	0.000000	2012	1225	504	1.00000	0.0000	0.0327	2024	3	25	Spring	174
+44	2024-03-25	University of West Georgia	2023-09-18	2024-09-15	25	0.21	0.79	Southeast	ga	carrollton	West Woods Student Living	0.776887	312062.00	13827.0	4	4.0	0.57000	2020	1302	629.000000	0.000000	0.120075	629.0	629.0	0.47190	0.0000	3.4364	0.1055	0.95310	1.02	519.000000	0.0	0.000000	2010	1490	896	0.06030	0.0000	4.3839	2024	3	25	Spring	174
+45	2024-03-25	University of West Georgia	2023-09-18	2024-09-15	25	0.21	0.79	Southeast	ga	carrollton	West Woods Student Living	0.776887	312062.00	13827.0	4	4.0	0.57000	2020	1302	629.000000	0.234264	0.120075	629.0	629.0	0.47190	-0.1820	3.4364	0.1055	0.95310	1.02	519.000000	0.0	0.000000	2010	1490	896	0.06030	0.0000	4.3839	2024	3	25	Spring	174
+46	2024-03-25	University of West Georgia	2023-09-18	2024-09-15	25	0.21	0.79	Southeast	ga	carrollton	The Reserve Carrollton	0.651894	252374.17	53057.0	3	3.0	0.57000	2020	1134	689.000000	0.000000	0.337864	689.0	689.0	0.63890	0.0000	0.5332	-0.1111	0.88890	0.42	486.179487	0.0	0.000000	2006	1202	936	0.22648	0.0000	6.0686	2024	3	25	Spring	174
+47	2024-03-25	University of West Georgia	2023-09-18	2024-09-15	25	0.21	0.79	Southeast	ga	carrollton	The Reserve Carrollton	0.651894	252374.17	53057.0	3	3.0	0.57000	2020	1134	689.000000	0.241441	0.337864	689.0	689.0	0.63890	0.0511	0.5332	-0.1111	0.88890	0.42	486.179487	0.0	0.000000	2006	1202	936	0.22648	0.1396	6.0686	2024	3	25	Spring	174
+48	2024-03-25	University of West Georgia	2023-09-18	2024-09-15	25	0.21	0.79	Southeast	ga	carrollton	West Woods Student Living	0.776887	312062.00	6879.0	3	3.0	0.57000	2020	1134	689.000000	0.000000	0.121784	689.0	689.0	0.63890	0.0000	0.1979	-0.0476	0.88890	1.02	595.000000	0.0	0.000000	2010	1168	144	0.13890	0.0000	0.6674	2024	3	25	Spring	174
+49	2024-03-25	University of West Georgia	2023-09-18	2024-09-15	25	0.21	0.79	Southeast	ga	carrollton	West Woods Student Living	0.776887	312062.00	6879.0	3	3.0	0.57000	2020	1134	689.000000	0.000000	0.121784	689.0	689.0	0.63890	0.0000	0.1979	-0.0476	0.88890	1.02	595.000000	0.0	0.000000	2010	1168	144	0.13890	0.0000	0.6674	2024	3	25	Spring	174
+52	2024-03-25	University of Illinois at Urbana-Champaign	2023-09-18	2024-09-15	25	0.28	0.72	Midwest	il	champaign	Seven07	0.982628	663093.02	257493.0	4	4.0	0.65733	2015	1401	987.844828	0.000000	0.035921	699.0	1285.0	0.71109	0.0000	-0.1160	-0.0398	0.90192	0.64	1047.571429	0.0	0.000000	2019	1228	308	0.63638	0.0000	0.0262	2024	3	25	Spring	174
+53	2024-03-25	University of Illinois at Urbana-Champaign	2023-09-18	2024-09-15	25	0.28	0.72	Midwest	il	champaign	Seven07	0.982628	663093.02	257493.0	4	4.0	0.65733	2015	1401	987.844828	-0.004626	0.035921	699.0	1285.0	0.71109	-0.2402	-0.1160	-0.0398	0.90192	0.64	1047.571429	0.0	0.000000	2019	1228	308	0.63638	0.0000	0.0262	2024	3	25	Spring	174
+54	2024-03-25	University of Illinois at Urbana-Champaign	2023-09-18	2024-09-15	25	0.28	0.72	Midwest	il	champaign	Seven07	0.982628	663093.02	257493.0	4	4.0	0.63166	2016	1214	992.435897	0.000000	-0.016416	785.0	1290.0	0.93592	0.0000	0.1010	0.0327	0.92950	0.64	1047.571429	0.0	0.000000	2019	1228	308	0.63638	0.0000	0.0370	2024	3	25	Spring	174
+Regression for Rate Recommendations
+df_rates = df.drop(['academicyearbegindate', 'academicyearenddate'], axis=1)
+
+# Define features and target variable
+X_rates = df_rates.drop('subjectrate', axis=1)
+y_rates = df_rates['subjectrate']
+
+# Split the data into training and testing sets
+X_train_rates, X_test_rates, y_train_rates, y_test_rates = train_test_split(X_rates, y_rates, test_size=0.2, random_state=42)
+
+# Identify categorical and numerical features
+# categorical_features = X_train_rates.select_dtypes(include=['object', 'category']).columns.tolist()
+# numerical_features = X_train_rates.select_dtypes(include=['int64', 'float64']).columns.tolist()
+
+# Define the preprocessing pipeline
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', StandardScaler(), numerical_features),
+        ('cat', OneHotEncoder(), categorical_features)])
+
+# Apply preprocessing inside a pipeline with RandomForestRegressor
+model = Pipeline(steps=[('preprocessor', preprocessor),
+                        ('regressor', RandomForestRegressor())])
+
+# Fit the model
+model.fit(X_train_rates, y_train_rates)
+
+# Make predictions and evaluate the model
+y_pred_rates = model.predict(X_test_rates)
+mse = mean_squared_error(y_test_rates, y_pred_rates)
+rmse = np.sqrt(mse)
+print(f"RMSE: {rmse}")
+RMSE: 20.819752897367106
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.arima.model import ARIMA
+import pandas as pd
+import category_encoders as ce
+
+# Clean the dataset
+df_leases = df.dropna()
+df_leases = df_leases.drop(['academicyearbegindate', 'academicyearenddate'], axis=1)
+
+# Convert to DateTimeIndex and ensure it's monotonic
+df_leases['asofdate'] = pd.to_datetime(df_leases['asofdate'])
+df_leases.set_index('asofdate', inplace=True)
+df_leases.sort_index(inplace=True)
+
+df_leases.head()
+college	weeksleftinacademicyear	collegeoncampushousing	collegeoffcampushousing	region	state	city	subjectcommunity	target occupancy	target rent revenue	ytdsignedrent	beds	baths	marketproximity	marketvintage	marketsqft	marketrate	weeklymarketratechange	yearlymarketratechange	minmarketrate	maxmarketrate	marketprelease	weeklymarketpreleasechange	yearlymarketpreleasechange	yearlymarketoccupancychange	marketoccupancy	subjectproximity	subjectrate	weeklysubjectratechange	yearlysubjectratechange	subjectvintage	subjectsqft	totalsubjectbeds	subjectprelease	weeklysubjectpreleasechange	yearlysubjectpreleasechange	year	month	day	semester	daysleftinschoolyear
+asofdate																																									
+2023-01-02	University of Alabama	37	0.29	0.71	Southeast	al	tuscaloosa	The Cottages at Lake Tamaha	0.953336	847619.98	23367.0	3	3.0	1.31736	2014	1255	725.700511	0.006129	0.039877	479.0	1419.0	0.53315	0.0305	-0.4268	1.1908	0.89449	2.27	683.047619	0.0	-0.07229	2009	1359	252	0.13888	0.0295	-0.8549	2023	1	2	Spring	258
+2023-01-02	University of Maryland, College Park	37	0.23	0.77	Northeast	md	college park	Landmark Apartments College Park	0.974794	1117905.73	706838.0	4	4.0	0.48285	2015	1117	1251.025105	-0.139450	-0.000280	1200.0	1275.0	0.51358	1.0543	1.3221	0.1255	0.81065	0.43	1372.939394	0.0	0.00000	2015	1370	132	0.95454	0.0000	0.1666	2023	1	2	Spring	258
+2023-01-02	University of Maryland, College Park	37	0.23	0.77	Northeast	md	college park	Landmark Apartments College Park	0.974794	1117905.73	98713.0	2	2.0	0.70678	2016	766	1356.788292	0.657632	1.227895	1020.0	1998.0	0.24358	1.0712	-0.0769	-0.0744	0.87409	0.43	1544.405405	0.0	0.00000	2015	730	74	0.83784	0.0000	-0.1621	2023	1	2	Spring	258
+2023-01-02	University of Maryland, College Park	37	0.23	0.77	Northeast	md	college park	Landmark Apartments College Park	0.974794	1117905.73	98713.0	2	2.0	0.52250	2008	677	818.509804	0.000000	-0.366963	569.0	1740.0	0.11760	0.0000	-0.8682	-0.4577	0.51960	0.43	1544.405405	0.0	0.00000	2015	730	74	0.83784	0.0164	-0.1621	2023	1	2	Spring	258
+2023-01-02	University of Maryland, College Park	37	0.23	0.77	Northeast	md	college park	Landmark Apartments College Park	0.974794	1117905.73	13483.0	1	1.0	0.73625	2010	489	1512.052174	0.000000	-0.144756	859.0	2115.0	0.15776	0.1239	-0.7390	-0.2002	0.66955	0.43	1870.428571	0.0	0.00000	2015	444	7	1.00000	0.0000	0.0000	2023	1	2	Spring	258
+# Preserving original cat columns
+original_df = df_leases.copy()
+
+for col in categorical_columns:
+    freq = df_leases[col].value_counts()
+    df_leases[col] = df_leases[col].map(freq)
+
+df_leases.set_index(['asofdate', 'beds', 'baths', 'subjectcommunity'], inplace=True)
+df_leases.sort_index(inplace=True)
+    
+# Filling missing values after setting a frequency, if necessary
+df_leases = df_leases.resample('W-MON').asfreq()
+
+df_leases['subjectprelease'] = df_leases['subjectprelease'].interpolate()  # or .fillna(method='ffill')
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+Cell In[88], line 9
+      6     df_leases[col] = df_leases[col].map(freq)
+      8 # Filling missing values after setting a frequency, if necessary
+----> 9 df_leases = df_leases.resample('W-MON').asfreq()
+     11 df_leases['subjectprelease'] = df_leases['subjectprelease'].interpolate()  # or .fillna(method='ffill')
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/resample.py:1108, in Resampler.asfreq(self, fill_value)
+   1072 def asfreq(self, fill_value=None):
+   1073     """
+   1074     Return the values at the new freq, essentially a reindex.
+   1075 
+   (...)
+   1106     Freq: MS, dtype: int64
+   1107     """
+-> 1108     return self._upsample("asfreq", fill_value=fill_value)
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/resample.py:1788, in DatetimeIndexResampler._upsample(self, method, limit, fill_value)
+   1786     if method == "asfreq":
+   1787         method = None
+-> 1788     result = obj.reindex(
+   1789         res_index, method=method, limit=limit, fill_value=fill_value
+   1790     )
+   1792 return self._wrap_result(result)
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/frame.py:5141, in DataFrame.reindex(self, labels, index, columns, axis, method, copy, level, fill_value, limit, tolerance)
+   5122 @doc(
+   5123     NDFrame.reindex,
+   5124     klass=_shared_doc_kwargs["klass"],
+   (...)
+   5139     tolerance=None,
+   5140 ) -> DataFrame:
+-> 5141     return super().reindex(
+   5142         labels=labels,
+   5143         index=index,
+   5144         columns=columns,
+   5145         axis=axis,
+   5146         method=method,
+   5147         copy=copy,
+   5148         level=level,
+   5149         fill_value=fill_value,
+   5150         limit=limit,
+   5151         tolerance=tolerance,
+   5152     )
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/generic.py:5521, in NDFrame.reindex(self, labels, index, columns, axis, method, copy, level, fill_value, limit, tolerance)
+   5518     return self._reindex_multi(axes, copy, fill_value)
+   5520 # perform the reindex on the axes
+-> 5521 return self._reindex_axes(
+   5522     axes, level, limit, tolerance, method, fill_value, copy
+   5523 ).__finalize__(self, method="reindex")
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/generic.py:5544, in NDFrame._reindex_axes(self, axes, level, limit, tolerance, method, fill_value, copy)
+   5541     continue
+   5543 ax = self._get_axis(a)
+-> 5544 new_index, indexer = ax.reindex(
+   5545     labels, level=level, limit=limit, tolerance=tolerance, method=method
+   5546 )
+   5548 axis = self._get_axis_number(a)
+   5549 obj = obj._reindex_with_indexers(
+   5550     {axis: [new_index, indexer]},
+   5551     fill_value=fill_value,
+   5552     copy=copy,
+   5553     allow_dups=False,
+   5554 )
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/indexes/base.py:4434, in Index.reindex(self, target, method, level, limit, tolerance)
+   4431     raise ValueError("cannot handle a non-unique multi-index!")
+   4432 elif not self.is_unique:
+   4433     # GH#42568
+-> 4434     raise ValueError("cannot reindex on an axis with duplicate labels")
+   4435 else:
+   4436     indexer, _ = self.get_indexer_non_unique(target)
+
+ValueError: cannot reindex on an axis with duplicate labels
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+# Ensure your target variable 'subjectprelease' is correctly prepared
+model = ExponentialSmoothing(df_leases['subjectprelease'], trend='add', seasonal='add', seasonal_periods=52)
+model_fit = model.fit()
+forecast = model_fit.forecast(steps=12)
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+Cell In[87], line 4
+      1 from statsmodels.tsa.holtwinters import ExponentialSmoothing
+      3 # Filling missing values after setting a frequency, if necessary
+----> 4 df_leases = df_leases.resample('W-MON').asfreq()
+      6 df_leases['subjectprelease'] = df_leases['subjectprelease'].interpolate()  # or .fillna(method='ffill')
+      8 # # Interpolating missing values again, ensuring no NaNs remain
+      9 # df_leases['subjectprelease'] = df_leases['subjectprelease'].interpolate(method='linear')
+     10 # # Confirm no NaNs remain
+     11 # assert not df_leases['subjectprelease'].isnull().any(), "NaN values present after interpolation."
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/resample.py:1108, in Resampler.asfreq(self, fill_value)
+   1072 def asfreq(self, fill_value=None):
+   1073     """
+   1074     Return the values at the new freq, essentially a reindex.
+   1075 
+   (...)
+   1106     Freq: MS, dtype: int64
+   1107     """
+-> 1108     return self._upsample("asfreq", fill_value=fill_value)
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/resample.py:1788, in DatetimeIndexResampler._upsample(self, method, limit, fill_value)
+   1786     if method == "asfreq":
+   1787         method = None
+-> 1788     result = obj.reindex(
+   1789         res_index, method=method, limit=limit, fill_value=fill_value
+   1790     )
+   1792 return self._wrap_result(result)
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/frame.py:5141, in DataFrame.reindex(self, labels, index, columns, axis, method, copy, level, fill_value, limit, tolerance)
+   5122 @doc(
+   5123     NDFrame.reindex,
+   5124     klass=_shared_doc_kwargs["klass"],
+   (...)
+   5139     tolerance=None,
+   5140 ) -> DataFrame:
+-> 5141     return super().reindex(
+   5142         labels=labels,
+   5143         index=index,
+   5144         columns=columns,
+   5145         axis=axis,
+   5146         method=method,
+   5147         copy=copy,
+   5148         level=level,
+   5149         fill_value=fill_value,
+   5150         limit=limit,
+   5151         tolerance=tolerance,
+   5152     )
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/generic.py:5521, in NDFrame.reindex(self, labels, index, columns, axis, method, copy, level, fill_value, limit, tolerance)
+   5518     return self._reindex_multi(axes, copy, fill_value)
+   5520 # perform the reindex on the axes
+-> 5521 return self._reindex_axes(
+   5522     axes, level, limit, tolerance, method, fill_value, copy
+   5523 ).__finalize__(self, method="reindex")
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/generic.py:5544, in NDFrame._reindex_axes(self, axes, level, limit, tolerance, method, fill_value, copy)
+   5541     continue
+   5543 ax = self._get_axis(a)
+-> 5544 new_index, indexer = ax.reindex(
+   5545     labels, level=level, limit=limit, tolerance=tolerance, method=method
+   5546 )
+   5548 axis = self._get_axis_number(a)
+   5549 obj = obj._reindex_with_indexers(
+   5550     {axis: [new_index, indexer]},
+   5551     fill_value=fill_value,
+   5552     copy=copy,
+   5553     allow_dups=False,
+   5554 )
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/indexes/base.py:4434, in Index.reindex(self, target, method, level, limit, tolerance)
+   4431     raise ValueError("cannot handle a non-unique multi-index!")
+   4432 elif not self.is_unique:
+   4433     # GH#42568
+-> 4434     raise ValueError("cannot reindex on an axis with duplicate labels")
+   4435 else:
+   4436     indexer, _ = self.get_indexer_non_unique(target)
+
+ValueError: cannot reindex on an axis with duplicate labels
+model = ExponentialSmoothing(df_leases['subjectprelease'], trend='add', seasonal='add', seasonal_periods=12)
+model_fit = model.fit()
+forecast = model_fit.forecast(steps=12)
+# Convert nullable integer/extension types to float for interpolation
+for col in df_leases.select_dtypes(include=["integer", "Int64"]).columns:
+    df_leases[col] = df_leases[col].astype(float)
+
+# Now, you can try interpolating again; this assumes 'subjectprelease' is the column you need to interpolate
+# And it is of a numeric type
+df_leases['subjectprelease'] = df_leases['subjectprelease'].interpolate(method='time')
+
+# If you had other numeric columns you wanted to interpolate, you could apply the same method
+
+
+df_leases.interpolate(method='time', inplace=True)
+
+# Infer the frequency
+inferred_freq = pd.infer_freq(df_leases.index)
+
+# If a frequency can be inferred, set it as the index's frequency
+if inferred_freq:
+    df_leases = df_leases.asfreq(inferred_freq)
+else:
+    print("No frequency could be inferred. Please set it manually if known.")
+# Check and set frequency
+df_leases.index.inferred_freq = df_leases.index.infer_freq()
+# If infer_freq() doesn't work as expected, explicitly set the frequency if you know it
+# df_leases = df_leases.asfreq('D')  # Example for daily data
+
+
+subjectprelease = df_leases['subjectprelease'].dropna()
+
+# ADF test
+result = adfuller(subjectprelease)
+print('ADF Statistic: %f' % result[0])
+print('p-value: %f' % result[1])
+
+# ARIMA model
+model = ARIMA(df_leases['subjectprelease'], order=(1,1,1))
+model_fit = model.fit()
+
+# This should now work without emitting the warnings about frequency or monotonicity
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+Cell In[68], line 6
+      1 # Check and set frequency
+      2 # df_leases.index.inferred_freq = df_leases.index.infer_freq()
+      3 # If infer_freq() doesn't work as expected, explicitly set the frequency if you know it
+      4 # df_leases = df_leases.asfreq('D')  # Example for daily data
+----> 6 df_leases = df_leases.asfreq('W', method='bfill')  # Backward fill
+      8 subjectprelease = df_leases['subjectprelease'].dropna()
+     10 # ADF test
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/generic.py:8878, in NDFrame.asfreq(self, freq, method, how, normalize, fill_value)
+   8771 """
+   8772 Convert time series to specified frequency.
+   8773 
+   (...)
+   8874 2000-01-01 00:03:00    3.0
+   8875 """
+   8876 from pandas.core.resample import asfreq
+-> 8878 return asfreq(
+   8879     self,
+   8880     freq,
+   8881     method=method,
+   8882     how=how,
+   8883     normalize=normalize,
+   8884     fill_value=fill_value,
+   8885 )
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/resample.py:2690, in asfreq(obj, freq, method, how, normalize, fill_value)
+   2688 dti = date_range(obj.index.min(), obj.index.max(), freq=freq)
+   2689 dti.name = obj.index.name
+-> 2690 new_obj = obj.reindex(dti, method=method, fill_value=fill_value)
+   2691 if normalize:
+   2692     new_obj.index = new_obj.index.normalize()
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/frame.py:5141, in DataFrame.reindex(self, labels, index, columns, axis, method, copy, level, fill_value, limit, tolerance)
+   5122 @doc(
+   5123     NDFrame.reindex,
+   5124     klass=_shared_doc_kwargs["klass"],
+   (...)
+   5139     tolerance=None,
+   5140 ) -> DataFrame:
+-> 5141     return super().reindex(
+   5142         labels=labels,
+   5143         index=index,
+   5144         columns=columns,
+   5145         axis=axis,
+   5146         method=method,
+   5147         copy=copy,
+   5148         level=level,
+   5149         fill_value=fill_value,
+   5150         limit=limit,
+   5151         tolerance=tolerance,
+   5152     )
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/generic.py:5521, in NDFrame.reindex(self, labels, index, columns, axis, method, copy, level, fill_value, limit, tolerance)
+   5518     return self._reindex_multi(axes, copy, fill_value)
+   5520 # perform the reindex on the axes
+-> 5521 return self._reindex_axes(
+   5522     axes, level, limit, tolerance, method, fill_value, copy
+   5523 ).__finalize__(self, method="reindex")
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/generic.py:5544, in NDFrame._reindex_axes(self, axes, level, limit, tolerance, method, fill_value, copy)
+   5541     continue
+   5543 ax = self._get_axis(a)
+-> 5544 new_index, indexer = ax.reindex(
+   5545     labels, level=level, limit=limit, tolerance=tolerance, method=method
+   5546 )
+   5548 axis = self._get_axis_number(a)
+   5549 obj = obj._reindex_with_indexers(
+   5550     {axis: [new_index, indexer]},
+   5551     fill_value=fill_value,
+   5552     copy=copy,
+   5553     allow_dups=False,
+   5554 )
+
+File ~/.conda/lib/python3.9/site-packages/pandas/core/indexes/base.py:4434, in Index.reindex(self, target, method, level, limit, tolerance)
+   4431     raise ValueError("cannot handle a non-unique multi-index!")
+   4432 elif not self.is_unique:
+   4433     # GH#42568
+-> 4434     raise ValueError("cannot reindex on an axis with duplicate labels")
+   4435 else:
+   4436     indexer, _ = self.get_indexer_non_unique(target)
+
+ValueError: cannot reindex on an axis with duplicate labels
+subjectprelease = df_leases['subjectprelease']
+subjectprelease.dropna(inplace=True)
+
+result = adfuller(subjectprelease)
+print('ADF Statistic: %f' % result[0])
+print('p-value: %f' % result[1])
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+
+plot_acf(subjectprelease)
+plot_pacf(subjectprelease)
+No description has been provided for this image
+No description has been provided for this image
+No description has been provided for this image
+from statsmodels.tsa.arima.model import ARIMA
+
+# Initialize and fit the ARIMA model
+model = ARIMA(df_leases['subjectprelease'], order=(1,1,1))
+model_fit = model.fit()
+/home/domo/.conda/lib/python3.9/site-packages/statsmodels/tsa/base/tsa_model.py:473: ValueWarning: A date index has been provided, but it has no associated frequency information and so will be ignored when e.g. forecasting.
+  self._init_dates(dates, freq)
+/home/domo/.conda/lib/python3.9/site-packages/statsmodels/tsa/base/tsa_model.py:473: ValueWarning: A date index has been provided, but it is not monotonic and so will be ignored when e.g. forecasting.
+  self._init_dates(dates, freq)
+/home/domo/.conda/lib/python3.9/site-packages/statsmodels/tsa/base/tsa_model.py:473: ValueWarning: A date index has been provided, but it has no associated frequency information and so will be ignored when e.g. forecasting.
+  self._init_dates(dates, freq)
+/home/domo/.conda/lib/python3.9/site-packages/statsmodels/tsa/base/tsa_model.py:473: ValueWarning: A date index has been provided, but it is not monotonic and so will be ignored when e.g. forecasting.
+  self._init_dates(dates, freq)
+/home/domo/.conda/lib/python3.9/site-packages/statsmodels/tsa/base/tsa_model.py:473: ValueWarning: A date index has been provided, but it has no associated frequency information and so will be ignored when e.g. forecasting.
+  self._init_dates(dates, freq)
+/home/domo/.conda/lib/python3.9/site-packages/statsmodels/tsa/base/tsa_model.py:473: ValueWarning: A date index has been provided, but it is not monotonic and so will be ignored when e.g. forecasting.
+  self._init_dates(dates, freq)
+forecasts = model_fit.forecast(steps=10)  # Predict the next 10 periods
+/home/domo/.conda/lib/python3.9/site-packages/statsmodels/tsa/base/tsa_model.py:836: ValueWarning: No supported index is available. Prediction results will be given with an integer index beginning at `start`.
+  return get_prediction_index(
+/home/domo/.conda/lib/python3.9/site-packages/statsmodels/tsa/base/tsa_model.py:836: FutureWarning: No supported index is available. In the next version, calling this method in a model without a supported index will result in an exception.
+  return get_prediction_index(
+# Assuming you have already defined y_train and y_test
+model = ARIMA(y_train, order=(p, d, q))
+model_fit = model.fit()
+
+# Forecast
+forecast = model_fit.forecast(steps=len(y_test))
+Time Series Forecasting for Prelease
+from statsmodels.tsa.arima.model import ARIMA
+
+# Assuming you have a time series 'weekly_leases'
+y = df['weekly_leases']
+split_point = int(len(y) * 0.8)
+y_train_leases = y[:split_point]
+
+ts_model = ARIMA(y_train_leases, order=(1,1,1))
+ts_model_fit = ts_model.fit()
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+
+X = df_cleaned.drop('subjectrate', axis=1)  # Assuming 'y' is the name of the column to predict
+y = df_cleaned['subjectrate']
+
+# Split the dataset into training and testing sets
+X_train_rates, X_test_rates, y_train_rates, y_test_rates = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Assume X_train is your input features and y_train is the target variable
+model = RandomForestRegressor()
+model.fit(X_train_rates, y_train_rates)
+
+# Get feature importance
+importances = model.feature_importances_
+from sklearn.linear_model import LinearRegression
+
+# Regression model for rates
+reg_model = LinearRegression()
+reg_model.fit(X_train_rates, y_train_rates)
+
+  LinearRegression?i
+LinearRegression()
+from statsmodels.tsa.arima.model import ARIMA
+
+X = df_cleaned.drop('subjectprelease', axis=1)  # Assuming 'y' is the name of the column to predict
+y = df_cleaned['subjectprelease']
+
+# Splitting the dataset based on time
+split_point = int(len(y) * 0.8)
+y_train_leases = y[:split_point]
+y_test_leases = y[split_point:]
+
+# Split the dataset into training and testing sets
+# X_train_leases, X_test_leases, y_train_leases, y_test_leases = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Time series model for weekly leases
+ts_model = ARIMA(y_train_leases, order=(1, 1, 1))  # Adjust the order as necessary based on your data
+ts_model_fit = ts_model.fit()
+/home/domo/.conda/lib/python3.9/site-packages/statsmodels/tsa/base/tsa_model.py:473: ValueWarning: An unsupported index was provided and will be ignored when e.g. forecasting.
+  self._init_dates(dates, freq)
+/home/domo/.conda/lib/python3.9/site-packages/statsmodels/tsa/base/tsa_model.py:473: ValueWarning: An unsupported index was provided and will be ignored when e.g. forecasting.
+  self._init_dates(dates, freq)
+/home/domo/.conda/lib/python3.9/site-packages/statsmodels/tsa/base/tsa_model.py:473: ValueWarning: An unsupported index was provided and will be ignored when e.g. forecasting.
+  self._init_dates(dates, freq)
+from sklearn.model_selection import train_test_split, cross_val_score
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# For regression models
+scores = cross_val_score(reg_model, X_train, y_train, cv=5)
+from sklearn.metrics import mean_squared_error
+
+# Predictions
+y_pred = reg_model.predict(X_test)
+
+# Evaluation
+mse = mean_squared_error(y_test, y_pred)
