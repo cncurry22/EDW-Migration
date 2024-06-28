@@ -1,0 +1,118 @@
+WITH flagged_data AS (
+    SELECT 
+        DATE_TRUNC('week', pr.updated)::DATE AS AsOfDate,
+        sc.name AS college,
+        prop.milesToClosestCampus AS "ProximitytoCampus",
+        (CASE 
+                WHEN TRIM(prop.yearBuilt) ~ '^[0-9]+$' THEN prop.yearBuilt::INTEGER
+                ELSE 0
+            END) AS "Vintage",
+        trn."impact",
+        prop.name AS "CommunityName",
+        prop.totalbeds AS "TotalCommunityBeds",
+        CAST(pn.beds AS VARCHAR) || 'BR/' || CAST(pn.baths AS VARCHAR) || 'BA' AS "UnitType",
+        pn.name AS "FloorplanName",
+        pr.rate, 
+        pr.totalBeds,
+        pr.prelease, 
+        pr.occupancy,
+        LAG(pr.rate) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) AS prev_rate,
+        LEAD(pr.rate) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) AS next_rate,
+        LAG(pr.prelease) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) AS prev_prelease,
+        LEAD(pr.prelease) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) AS next_prelease,
+        LAG(pr.occupancy) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) AS prev_occupancy,
+        LEAD(pr.occupancy) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) AS next_occupancy,
+        CASE 
+            WHEN pr.rate < 100
+                AND LAG(pr.rate) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) > 100
+                AND LEAD(pr.rate) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) > 100            
+            THEN 1 
+            ELSE 0 
+        END AS rate_not_updated,
+        CASE 
+            WHEN pr.prelease = 0 
+                AND LAG(pr.prelease) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) > 0 
+                AND LEAD(pr.prelease) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) > 0  
+            THEN 1 ELSE 0 
+        END AS prelease_not_updated,
+        CASE 
+            WHEN pr.occupancy = 0 
+                AND LAG(pr.occupancy) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) > 0
+                AND LEAD(pr.occupancy) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) > 0 
+            THEN 1 ELSE 0 
+        END AS occupancy_not_updated,
+        CASE 
+            WHEN pr.rate IS NULL 
+                OR pr.prelease IS NULL 
+                OR pr.occupancy IS NULL 
+            THEN 1
+            WHEN pr.rate < 100
+                AND LAG(pr.rate) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) < 100
+                AND LEAD(pr.rate) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) < 100 
+            THEN 1
+            ELSE 0
+        END AS invalid_record,
+        pr."is_from_cardinal"
+    FROM "rpt_plan_reports_cardinal" pr
+    INNER JOIN "rpt_plans_cardinal" pn ON pr.planKey = pn.KEY
+    INNER JOIN "rpt_properties_cardinal" prop ON pn.propertyKey = prop.KEY
+    LEFT JOIN "collegehousemarketcompetitormapping" mp ON prop.KEY = mp."CH key"
+    LEFT JOIN "gcp_terrain_psql_reporting_trn_community_vw" trn ON COALESCE(mp."CH Name", mp."Terrain Name") = trn."property_name_comp"
+    INNER JOIN "rpt_schools_cardinal" sc ON ABS(SQRT(POW(69.1 * (prop.latitude - sc.latitude), 2) + POW(69.1 * (prop.longitude - sc.longitude) * COS(sc.latitude / 57.3), 2))) - prop.milesToClosestCampus < 0.05
+    WHERE pr."isSyndicated" + pr."is_from_cardinal" > 0
+        AND DATE_TRUNC('week', pr.updated)::DATE > '20210801'
+),
+corrected_data AS (
+    SELECT 
+        AsOfDate,
+        college,
+        "ProximitytoCampus",
+        "Vintage",
+        "CommunityName",
+        "TotalCommunityBeds",
+        "UnitType",
+        "FloorplanName",
+        rate,
+        prelease,
+        occupancy,
+        prev_rate,
+        next_rate,
+        prev_prelease,
+        next_prelease,
+        prev_occupancy,
+        next_occupancy,
+        rate_not_updated,
+        prelease_not_updated,
+        occupancy_not_updated,
+        "impact",
+  		"is_from_cardinal",
+        CASE 
+            WHEN rate_not_updated = 1 
+                AND prev_rate IS NOT NULL 
+                AND next_rate IS NOT NULL 
+                AND (LEAD(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate) - LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate)) != 0
+            THEN prev_rate + (next_rate - prev_rate) / NULLIF((LEAD(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate) - LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate)), 0) * (DATEDIFF('week', LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate), AsOfDate))
+            ELSE rate
+        END AS filled_rate,
+        CASE 
+            WHEN prelease_not_updated = 1 
+                AND prev_prelease IS NOT NULL 
+                AND next_prelease IS NOT NULL 
+                AND (LEAD(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate) - LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate)) != 0
+            THEN prev_prelease + (next_prelease - prev_prelease) / NULLIF((LEAD(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate) - LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate)), 0) * (DATEDIFF('week', LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate), AsOfDate))
+            ELSE prelease
+        END AS filled_prelease,
+        CASE 
+            WHEN occupancy_not_updated = 1 
+                AND prev_occupancy IS NOT NULL 
+                AND next_occupancy IS NOT NULL 
+                AND (LEAD(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate) - LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate)) != 0
+            THEN prev_occupancy + (next_occupancy - prev_occupancy) / NULLIF((LEAD(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate) - LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate)), 0) * (DATEDIFF('week', LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate), AsOfDate))
+            ELSE occupancy
+        END AS filled_occupancy,
+        DATEDIFF('week', LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate), AsOfDate) AS weeks_between
+    FROM flagged_data
+    WHERE invalid_record = 0
+)
+SELECT * FROM corrected_data
+ORDER BY AsOfDate DESC, "CommunityName" ASC, "UnitType" ASC, "FloorplanName" ASC;
