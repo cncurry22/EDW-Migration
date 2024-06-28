@@ -1,0 +1,243 @@
+import domojupyter as domo
+data = domo.read_dataframe('Dataset for Hierarchical Clustering Analysis', query='SELECT * FROM table')
+# Check for null values
+print("Null values before dropping rows:\n", data.isnull().sum())
+Null values before dropping rows:
+ date                                                        0
+communityname                                               0
+bedroomcnt                                                  0
+bathroomcnt                                                 0
+floorplanname                                               0
+rentablebedcnt                                          99386
+sqftperbed                                             131250
+deseasonalized_occupiedbedcnt                          210370
+deseasonalized_daily_change_netpreleasedbedspacecnt    141399
+deseasonalized_askingrate                              101333
+deseasonalized_leasedrate                              198855
+normalized_occupiedbedcnt                              272730
+normalized_daily_change_netpreleasedbedspacecnt        158525
+normalized_askingrate                                  134877
+normalized_leasedrate                                  226561
+dtype: int64
+# Drop rows with null values
+data.dropna(inplace=True)
+
+# Check for null values after dropping rows
+print("Null values after dropping rows:\n", data.isnull().sum())
+Null values after dropping rows:
+ date                                                   0
+communityname                                          0
+bedroomcnt                                             0
+bathroomcnt                                            0
+floorplanname                                          0
+rentablebedcnt                                         0
+sqftperbed                                             0
+deseasonalized_occupiedbedcnt                          0
+deseasonalized_daily_change_netpreleasedbedspacecnt    0
+deseasonalized_askingrate                              0
+deseasonalized_leasedrate                              0
+normalized_occupiedbedcnt                              0
+normalized_daily_change_netpreleasedbedspacecnt        0
+normalized_askingrate                                  0
+normalized_leasedrate                                  0
+dtype: int64
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+import numpy as np
+
+# Convert the date column to datetime format
+data['date'] = pd.to_datetime(data['date'])
+
+# Function to determine the optimal number of clusters using the Elbow method without plotting
+def determine_optimal_clusters(X):
+    inertia = []
+    for n in range(1, min(len(X), 11)):  # Ensure the range does not exceed the number of samples
+        kmeans = KMeans(n_clusters=n, random_state=42)
+        kmeans.fit(X)
+        inertia.append(kmeans.inertia_)
+    # Determine the optimal number of clusters programmatically (e.g., find the "elbow point")
+    if len(inertia) > 2:
+        optimal_clusters = 3  # Default to 3 if no clear elbow is found
+        for i in range(1, len(inertia) - 1):
+            if inertia[i] - inertia[i + 1] == 0:
+                continue
+            if (inertia[i - 1] - inertia[i]) / (inertia[i] - inertia[i + 1]) > 1:
+                optimal_clusters = i + 1
+                break
+        return optimal_clusters
+    else:
+        return 1  # If only one or two samples, return 1 cluster
+
+# Perform clustering for each community, bed/bath combo, and floorplan
+communities = data['communityname'].unique()
+all_clusters = []
+
+for community in communities:
+    community_data = data[data['communityname'] == community]
+    bed_bath_combos = community_data[['bedroomcnt', 'bathroomcnt']].drop_duplicates()
+    
+    for _, combo in bed_bath_combos.iterrows():
+        combo_data = community_data[
+            (community_data['bedroomcnt'] == combo['bedroomcnt']) & 
+            (community_data['bathroomcnt'] == combo['bathroomcnt'])
+        ]
+        
+        floorplans = combo_data['floorplanname'].unique()
+        
+        for floorplan in floorplans:
+            floorplan_data = combo_data[combo_data['floorplanname'] == floorplan]
+            
+            # Extract relevant features for clustering
+            features = ['normalized_occupiedbedcnt', 'normalized_daily_change_netpreleasedbedspacecnt', 'normalized_askingrate', 'normalized_leasedrate']
+            X = floorplan_data[features]
+            
+            if len(X) < 2:
+                # Skip clustering if there are not enough samples
+                continue
+            
+            # Determine the optimal number of clusters
+            optimal_clusters = determine_optimal_clusters(X)
+            optimal_clusters = min(optimal_clusters, len(np.unique(X, axis=0)))  # Ensure the number of clusters does not exceed the number of distinct samples
+            
+            kmeans = KMeans(n_clusters=optimal_clusters, random_state=42)
+            floorplan_data = floorplan_data.copy()
+            floorplan_data.loc[:, 'cluster'] = kmeans.fit_predict(X)
+            
+            all_clusters.append(floorplan_data)
+
+# Concatenate all clusters
+clustered_data = pd.concat(all_clusters)
+
+# Filter to keep only the most recent data for each community, bed/bath combo, and floorplan
+most_recent_data = clustered_data.sort_values(by='date').drop_duplicates(subset=['communityname', 'bedroomcnt', 'bathroomcnt', 'floorplanname'], keep='last')
+
+# Analyze clusters
+cluster_analysis = most_recent_data.groupby(['communityname', 'bedroomcnt', 'bathroomcnt', 'floorplanname', 'cluster']).mean()
+
+# Function to create a user-friendly description for each row based on its values
+def create_custom_cluster_description(row, cluster_means):
+    descriptions = []
+    for feature in cluster_means.columns:
+        if feature not in ['communityname', 'bedroomcnt', 'bathroomcnt', 'floorplanname', 'cluster', 'date']:
+            feature_mean = cluster_means[feature].loc[row['cluster']]
+            if row[feature] > feature_mean:
+                descriptions.append(f"{feature.replace('_', ' ')} is higher than average")
+            else:
+                descriptions.append(f"{feature.replace('_', ' ')} is lower than average")
+    return "This floorplan has the following characteristics: " + "; ".join(descriptions) + "."
+
+# Add description column
+cluster_means = most_recent_data.groupby(['communityname', 'bedroomcnt', 'bathroomcnt', 'floorplanname', 'cluster']).mean()
+most_recent_data['cluster_description'] = most_recent_data.apply(lambda row: create_custom_cluster_description(row, cluster_means.loc[row['communityname'], row['bedroomcnt'], row['bathroomcnt'], row['floorplanname']]), axis=1)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (9) found smaller than n_clusters (10). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (8) found smaller than n_clusters (9). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (8) found smaller than n_clusters (10). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (4) found smaller than n_clusters (5). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (4) found smaller than n_clusters (6). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (4) found smaller than n_clusters (7). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (4) found smaller than n_clusters (8). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (4) found smaller than n_clusters (9). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (8) found smaller than n_clusters (9). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (8) found smaller than n_clusters (10). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (2) found smaller than n_clusters (3). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (6) found smaller than n_clusters (7). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (6) found smaller than n_clusters (8). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (6) found smaller than n_clusters (9). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (6) found smaller than n_clusters (10). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (3) found smaller than n_clusters (4). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (3) found smaller than n_clusters (5). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (3) found smaller than n_clusters (6). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (3) found smaller than n_clusters (7). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (3) found smaller than n_clusters (8). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (3) found smaller than n_clusters (9). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (3) found smaller than n_clusters (10). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (7) found smaller than n_clusters (8). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (7) found smaller than n_clusters (9). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (7) found smaller than n_clusters (10). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (7) found smaller than n_clusters (8). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (7) found smaller than n_clusters (9). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+/home/domo/.conda/lib/python3.9/site-packages/sklearn/base.py:1474: ConvergenceWarning: Number of distinct clusters (7) found smaller than n_clusters (10). Possibly due to duplicate points in X.
+  return fit_method(estimator, *args, **kwargs)
+# # Set display options to show all columns
+# pd.set_option('display.max_columns', None)
+# pd.set_option('display.expand_frame_repr', False)
+# pd.set_option('display.max_colwidth', None)
+
+# # Display the analysis
+# cluster_analysis.head(10)
+date	rentablebedcnt	sqftperbed	deseasonalized_occupiedbedcnt	deseasonalized_daily_change_netpreleasedbedspacecnt	deseasonalized_askingrate	deseasonalized_leasedrate	normalized_occupiedbedcnt	normalized_daily_change_netpreleasedbedspacecnt	normalized_askingrate	normalized_leasedrate
+communityname	bedroomcnt	bathroomcnt	floorplanname	cluster											
+12 North	0	1.0	Studio	0	2024-05-30	31.0	344.0	-1.926829	-0.311475	-13.12500	20.348009	-4.090271e-01	-0.164333	-0.193204	0.458694
+1	1.0	1BR/1BA - Classic	0	2024-05-30	4.0	638.0	0.000000	-0.016393	2.00000	35.000000	1.418599e-17	-0.050672	0.030827	0.647099
+2	2.0	2BR/2BA - Classic - A	0	2024-05-30	6.0	269.0	-1.317073	-0.065574	13.25000	72.291667	-5.607955e-01	-0.181596	0.272811	0.498154
+2BR/2BA - Classic - B	1	2024-05-30	280.0	269.0	14.478261	-1.377049	11.00000	20.756768	3.022552e-01	-0.065869	0.247199	0.543770
+2BR/2BA - Deluxe	1	2024-05-30	254.0	270.5	9.956522	-2.622951	15.50000	21.454738	2.139073e-01	-0.137852	0.348690	0.522919
+2BR/2BA - Premium - A	1	2024-05-30	8.0	420.5	0.000000	-0.016393	12.50000	40.093750	3.492658e-17	-0.026391	0.227534	0.656579
+2BR/2BA - Premium - B	0	2024-05-30	8.0	324.0	0.000000	-0.016393	20.00000	49.089286	-7.565871e-17	-0.047849	0.363120	0.673144
+2BR/2BA - Premium - C	0	2024-05-30	8.0	490.0	0.000000	-0.016393	13.00000	19.875000	7.985772e-17	-0.024498	0.245167	0.646191
+2BR/2BA - Premium - D	1	2024-05-30	10.0	658.0	0.000000	-0.032787	56.25000	45.333333	1.621258e-17	-0.038276	0.582559	0.648482
+2818 Apartments	4	4.0	4BR/4BA - Flat	0	2024-05-30	232.0	320.5	0.718750	-11.000000	13.21875	1.434719	1.742045e+00	-0.307436	0.681670	1.145483
+domo.write_dataframe(most_recent_data, 'CommunityUnitMixClustering')
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+ 
