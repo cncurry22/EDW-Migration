@@ -1,0 +1,575 @@
+Data Import
+import domojupyter as domo
+df = domo.read_dataframe('VwRateAnalyticsToolUnclustered', query='SELECT * FROM table')
+# Display the first few rows and summary information of the dataframe
+df.head(), df.info()
+
+# Preprocess the data
+df = df.sort_values(by=['communityname', 'unittype', 'date'], ascending=[True, True, False])
+<class 'pandas.core.frame.DataFrame'>
+RangeIndex: 285949 entries, 0 to 285948
+Data columns (total 69 columns):
+ #   Column                                Non-Null Count   Dtype         
+---  ------                                --------------   -----         
+ 0   date                                  285949 non-null  datetime64[ns]
+ 1   academicyearbegindate                 285949 non-null  datetime64[ns]
+ 2   academicyearenddate                   285949 non-null  datetime64[ns]
+ 3   weekbegindate                         285949 non-null  datetime64[ns]
+ 4   weekenddate                           285949 non-null  datetime64[ns]
+ 5   keystonereportingind                  285949 non-null  object        
+ 6   propertytype                          285949 non-null  object        
+ 7   totalcommunitybeds                    285949 non-null  Int64         
+ 8   college                               285949 non-null  object        
+ 9   proximitytocampus                     285949 non-null  float64       
+ 10  vintage                               285949 non-null  Int64         
+ 11  cgmgmtstatus                          285949 non-null  object        
+ 12  propertycd                            285949 non-null  object        
+ 13  communityname                         285949 non-null  object        
+ 14  unittype                              285949 non-null  object        
+ 15  newleasesustainablecap                275733 non-null  float64       
+ 16  renewalleasesustainablecap            214925 non-null  float64       
+ 17  totalmarketunitbeds                   256803 non-null  Int64         
+ 18  avgmarketunitsqft                     254784 non-null  Int64         
+ 19  avgmarketunitrate                     256782 non-null  float64       
+ 20  marketunitprelease                    256796 non-null  float64       
+ 21  marketunitoccupancy                   256516 non-null  float64       
+ 22  ytdtotalleases                        285949 non-null  float64       
+ 23  ytdnewleases                          285949 non-null  float64       
+ 24  ytdrenewalleases                      285949 non-null  float64       
+ 25  signedmonthlyrentusd                  285949 non-null  float64       
+ 26  newleasesignedmonthlyrentusd          285949 non-null  float64       
+ 27  renewalleasesignedmonthlyrentusd      285949 non-null  float64       
+ 28  totalweeklyleases                     281265 non-null  float64       
+ 29  newweeklyleases                       281265 non-null  float64       
+ 30  totalweeklysignedrent                 281265 non-null  float64       
+ 31  newweeklysignedrent                   281265 non-null  float64       
+ 32  totaltrailing30dayleases              266219 non-null  float64       
+ 33  newtrailing30dayleases                266219 non-null  float64       
+ 34  totaltrailing30daysignedrent          266219 non-null  float64       
+ 35  newtrailing30daysignedrent            266219 non-null  float64       
+ 36  totaltrailing60dayleases              247953 non-null  float64       
+ 37  newtrailing60dayleases                247953 non-null  float64       
+ 38  totaltrailing60daysignedrent          247953 non-null  float64       
+ 39  newtrailing60daysignedrent            247953 non-null  float64       
+ 40  totalyearlyleasevariance              94924 non-null   float64       
+ 41  newyearlyleasevariance                94924 non-null   float64       
+ 42  totalyearlysignedrentvariance         94924 non-null   float64       
+ 43  newyearlysignedrentvariance           94924 non-null   float64       
+ 44  weeklyaskingratechange                224972 non-null  float64       
+ 45  currentaskingrate                     228052 non-null  float64       
+ 46  dailyleads                            279224 non-null  Int64         
+ 47  trailing7dayleads                     279224 non-null  Int64         
+ 48  trailing4weekaverageleads             279224 non-null  Int64         
+ 49  trailingadditional4weekaverageleads   271338 non-null  Int64         
+ 50  prioryeartrailing7dayleads            153786 non-null  Int64         
+ 51  dailytours                            279224 non-null  Int64         
+ 52  trailing7daytours                     279224 non-null  Int64         
+ 53  trailing4weekaveragetours             279224 non-null  Int64         
+ 54  trailingadditional4weekaveragetours   271338 non-null  Int64         
+ 55  prioryeartrailing7daytours            153786 non-null  Int64         
+ 56  dailyapps                             279224 non-null  Int64         
+ 57  trailing7dayapps                      279224 non-null  Int64         
+ 58  trailing4weekaverageapps              279224 non-null  Int64         
+ 59  trailingadditional4weekaverageapps    271338 non-null  Int64         
+ 60  prioryeartrailing7dayapps             153786 non-null  Int64         
+ 61  dailyleases                           279224 non-null  Int64         
+ 62  trailing7dayleases                    279224 non-null  Int64         
+ 63  trailing4weekaverageleases            279224 non-null  Int64         
+ 64  trailingadditional4weekaverageleases  271338 non-null  Int64         
+ 65  prioryeartrailing7dayleases           153786 non-null  Int64         
+ 66  rentablebedcnt                        238019 non-null  float64       
+ 67  sqftperbed                            230492 non-null  float64       
+ 68  occupiedbedcnt                        214242 non-null  float64       
+dtypes: Int64(24), datetime64[ns](5), float64(33), object(7)
+memory usage: 157.1+ MB
+# Summary Statistics
+summary_stats = df.describe()
+
+# Display the collected information
+print("Summary Statistics:\n", summary_stats)
+Summary Statistics:
+                                 date          academicyearbegindate  \
+count                         285949                         285949   
+mean   2023-09-04 09:58:13.214523648  2024-03-15 22:24:02.195636480   
+min              2022-09-19 00:00:00            2023-09-18 00:00:00   
+25%              2023-04-07 00:00:00            2023-09-18 00:00:00   
+50%              2023-09-14 00:00:00            2023-09-18 00:00:00   
+75%              2024-02-08 00:00:00            2024-09-16 00:00:00   
+max              2024-06-25 00:00:00            2024-09-16 00:00:00   
+std                              NaN                            NaN   
+
+                 academicyearenddate                  weekbegindate  \
+count                         285949                         285949   
+mean   2025-03-17 09:26:48.391706368  2023-09-01 10:04:59.910822912   
+min              2024-09-15 00:00:00            2022-09-19 00:00:00   
+25%              2024-09-15 00:00:00            2023-04-03 00:00:00   
+50%              2024-09-15 00:00:00            2023-09-11 00:00:00   
+75%              2025-09-21 00:00:00            2024-02-05 00:00:00   
+max              2025-09-21 00:00:00            2024-06-24 00:00:00   
+std                              NaN                            NaN   
+
+                         weekenddate  totalcommunitybeds  proximitytocampus  \
+count                         285949            285949.0      285949.000000   
+mean   2023-09-07 10:04:59.910822912          549.873985           0.961008   
+min              2022-09-25 00:00:00                12.0           0.180000   
+25%              2023-04-09 00:00:00               302.0           0.470000   
+50%              2023-09-17 00:00:00               548.0           0.810000   
+75%              2024-02-11 00:00:00               752.0           1.120000   
+max              2024-06-30 00:00:00              1306.0           3.710000   
+std                              NaN          297.097753           0.657597   
+
+           vintage  newleasesustainablecap  renewalleasesustainablecap  ...  \
+count     285949.0           275733.000000               214925.000000  ...   
+mean   2007.778611               88.865533                   66.428522  ...   
+min         1895.0                1.000000                    2.000000  ...   
+25%         2005.0               15.000000                   16.000000  ...   
+50%         2013.0               42.000000                   34.000000  ...   
+75%         2018.0              123.000000                   97.000000  ...   
+max         2025.0              629.000000                  526.000000  ...   
+std       19.69606              108.504901                   74.698969  ...   
+
+       trailingadditional4weekaverageapps  prioryeartrailing7dayapps  \
+count                            271338.0                   153786.0   
+mean                             1.848517                   2.447973   
+min                                   0.0                        0.0   
+25%                                   0.0                        0.0   
+50%                                   0.0                        0.0   
+75%                                   2.0                        3.0   
+max                                 234.0                      184.0   
+std                              4.149384                   5.678154   
+
+       dailyleases  trailing7dayleases  trailing4weekaverageleases  \
+count     279224.0            279224.0                    279224.0   
+mean      0.270464            1.768634                    1.417872   
+min            0.0                 0.0                         0.0   
+25%            0.0                 0.0                         0.0   
+50%            0.0                 0.0                         0.0   
+75%            0.0                 2.0                         1.0   
+max          415.0               415.0                       103.0   
+std       1.466348            4.905601                     3.57483   
+
+       trailingadditional4weekaverageleases  prioryeartrailing7dayleases  \
+count                              271338.0                     153786.0   
+mean                               1.380905                     1.906702   
+min                                     0.0                          0.0   
+25%                                     0.0                          0.0   
+50%                                     0.0                          0.0   
+75%                                     1.0                          2.0   
+max                                   231.0                        180.0   
+std                                3.607386                     4.900834   
+
+       rentablebedcnt     sqftperbed  occupiedbedcnt  
+count   238019.000000  230492.000000   214242.000000  
+mean       140.687071     425.865404      130.715765  
+min          1.000000      21.428571        1.000000  
+25%         24.000000     334.831609       21.000000  
+50%         66.000000     400.666667       61.000000  
+75%        192.000000     492.000000      189.000000  
+max       2032.000000    1700.000000     2030.000000  
+std        169.218697     191.322935      155.854181  
+
+[8 rows x 62 columns]
+Exploratory Analysis to Determine Features
+import pandas as pd
+import numpy as np
+from catboost import CatBoostRegressor, Pool
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Drop records with null values
+df.dropna(inplace=True)
+
+# Feature Engineering: Extracting date and seasonal features
+df['date'] = pd.to_datetime(df['date'])
+df['year'] = df['date'].dt.year
+df['month'] = df['date'].dt.month
+df['day'] = df['date'].dt.day
+
+# Calculate week of the academic year
+df['academicyearbegindate'] = pd.to_datetime(df['academicyearbegindate'])
+df['week_of_academic_year'] = ((df['date'] - df['academicyearbegindate']).dt.days // 7) % 52
+
+# Define Target Variable and Features
+target = 'trailing7dayleads'
+exclude_cols = ['keystonereportingind', 'propertytype', 'cgmgmtstatus', 'propertycd', 
+                'date', 'academicyearbegindate', 'academicyearenddate', 'weekbegindate', 'weekenddate', 'college', 'proximitytocampus', 'vintage']
+features = df.drop(columns=[target] + exclude_cols)
+
+X = df[features.columns]
+y = df[target]
+
+# Identify categorical features
+categorical_cols = ['communityname', 'unittype']
+cat_features_index = [X.columns.get_loc(col) for col in categorical_cols]
+
+# Train-Test Split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Create Pool for CatBoost
+train_pool = Pool(X_train, y_train, cat_features=cat_features_index)
+test_pool = Pool(X_test, cat_features=cat_features_index)
+
+# Model Training
+model = CatBoostRegressor(iterations=1000, learning_rate=0.1, depth=6, verbose=100)
+model.fit(train_pool)
+
+# Model Prediction
+y_pred = model.predict(test_pool)
+
+# Model Evaluation
+mse = mean_squared_error(y_test, y_pred)
+rmse = np.sqrt(mse)
+
+print(f"RMSE: {rmse}")
+
+# Feature Importance
+feature_importance = model.get_feature_importance(train_pool)
+feature_importance_df = pd.DataFrame({'Feature': features.columns, 'Importance': feature_importance}).sort_values(by='Importance', ascending=False)
+0:	learn: 7.2158275	total: 64.4ms	remaining: 1m 4s
+100:	learn: 2.4407711	total: 1.75s	remaining: 15.5s
+200:	learn: 2.1851297	total: 3.39s	remaining: 13.5s
+300:	learn: 2.0392888	total: 5.06s	remaining: 11.7s
+400:	learn: 1.9339300	total: 6.74s	remaining: 10.1s
+500:	learn: 1.8532429	total: 8.4s	remaining: 8.37s
+600:	learn: 1.7766984	total: 10.1s	remaining: 6.71s
+700:	learn: 1.7165775	total: 11.8s	remaining: 5.03s
+800:	learn: 1.6595303	total: 13.5s	remaining: 3.35s
+900:	learn: 1.6105036	total: 15.2s	remaining: 1.67s
+999:	learn: 1.5669825	total: 16.9s	remaining: 0us
+RMSE: 2.0620466077265016
+# Display Feature Importance
+print("Feature Importance:")
+print(feature_importance_df)
+Feature Importance:
+                                 Feature  Importance
+35             trailing4weekaverageleads   41.237538
+39                     trailing7daytours   12.572628
+34                            dailyleads    9.731422
+44                      trailing7dayapps    7.365937
+40             trailing4weekaveragetours    3.149291
+45              trailing4weekaverageapps    2.744293
+41   trailingadditional4weekaveragetours    1.439160
+20              totaltrailing30dayleases    1.293557
+57                                 month    1.232212
+21                newtrailing30dayleases    1.004489
+6                      avgmarketunitsqft    0.927650
+58                                   day    0.926558
+36   trailingadditional4weekaverageleads    0.758586
+59                 week_of_academic_year    0.743860
+37            prioryeartrailing7dayleads    0.743446
+33                     currentaskingrate    0.643599
+8                     marketunitprelease    0.635917
+50            trailing4weekaverageleases    0.587181
+0                     totalcommunitybeds    0.569532
+28              totalyearlyleasevariance    0.503587
+23            newtrailing30daysignedrent    0.492954
+9                    marketunitoccupancy    0.445089
+30         totalyearlysignedrentvariance    0.441312
+25                newtrailing60dayleases    0.430240
+31           newyearlysignedrentvariance    0.427726
+18                 totalweeklysignedrent    0.395011
+49                    trailing7dayleases    0.394409
+14          newleasesignedmonthlyrentusd    0.354620
+38                            dailytours    0.352847
+22          totaltrailing30daysignedrent    0.344836
+19                   newweeklysignedrent    0.334550
+11                          ytdnewleases    0.333744
+29                newyearlyleasevariance    0.333097
+10                        ytdtotalleases    0.325791
+54                            sqftperbed    0.303234
+12                      ytdrenewalleases    0.296647
+13                  signedmonthlyrentusd    0.296623
+16                     totalweeklyleases    0.287090
+15      renewalleasesignedmonthlyrentusd    0.283632
+55                        occupiedbedcnt    0.282767
+5                    totalmarketunitbeds    0.274460
+27            newtrailing60daysignedrent    0.274223
+7                      avgmarketunitrate    0.263450
+24              totaltrailing60dayleases    0.253256
+4             renewalleasesustainablecap    0.250538
+52           prioryeartrailing7dayleases    0.248953
+42            prioryeartrailing7daytours    0.228317
+32                weeklyaskingratechange    0.228038
+1                          communityname    0.224663
+26          totaltrailing60daysignedrent    0.223052
+47             prioryeartrailing7dayapps    0.208734
+46    trailingadditional4weekaverageapps    0.197171
+2                               unittype    0.179139
+48                           dailyleases    0.176464
+43                             dailyapps    0.161127
+56                                  year    0.154684
+3                 newleasesustainablecap    0.144975
+51  trailingadditional4weekaverageleases    0.138004
+53                        rentablebedcnt    0.128545
+17                       newweeklyleases    0.075547
+Feature Selection
+# Select top N features based on importance
+N = 20  # You can change this number based on your preference
+top_features = feature_importance_df.head(N)['Feature'].tolist()
+
+# Update the feature set
+X_top = X[top_features]
+
+# Train-Test Split with selected features
+X_train_top, X_test_top, y_train, y_test = train_test_split(X_top, y, test_size=0.2, random_state=42)
+
+# Create Pool for CatBoost with selected features
+train_pool_top = Pool(X_train_top, y_train, cat_features=[X_top.columns.get_loc(col) for col in categorical_cols if col in top_features])
+test_pool_top = Pool(X_test_top, cat_features=[X_top.columns.get_loc(col) for col in categorical_cols if col in top_features])
+
+# Model Training
+model_top = CatBoostRegressor(iterations=1000, learning_rate=0.1, depth=6, verbose=100)
+model_top.fit(train_pool_top)
+
+# Model Prediction
+y_pred_top = model_top.predict(test_pool_top)
+
+# Model Evaluation
+mse_top = mean_squared_error(y_test, y_pred_top)
+rmse_top = np.sqrt(mse_top)
+
+print(f"RMSE after feature selection: {rmse_top}")
+0:	learn: 7.2024021	total: 4.53ms	remaining: 4.53s
+100:	learn: 2.4653058	total: 418ms	remaining: 3.72s
+200:	learn: 2.2168164	total: 828ms	remaining: 3.29s
+300:	learn: 2.0791516	total: 1.24s	remaining: 2.88s
+400:	learn: 1.9841182	total: 1.65s	remaining: 2.47s
+500:	learn: 1.9074341	total: 2.08s	remaining: 2.07s
+600:	learn: 1.8475991	total: 2.49s	remaining: 1.65s
+700:	learn: 1.7883550	total: 2.92s	remaining: 1.25s
+800:	learn: 1.7382335	total: 3.35s	remaining: 832ms
+900:	learn: 1.6936199	total: 3.77s	remaining: 415ms
+999:	learn: 1.6531321	total: 4.2s	remaining: 0us
+RMSE after feature selection: 2.05935516715861
+# Aggregate by academic year and week for more general trends
+weekly_avg = df.groupby(['year', 'week_of_academic_year'])['trailing7dayleads'].mean().reset_index()
+plt.figure(figsize=(14, 7))
+sns.lineplot(data=weekly_avg, x='week_of_academic_year', y='trailing7dayleads', hue='year')
+plt.title('Weekly Average Lead Volume')
+plt.show()
+No description has been provided for this image
+Hyperparameter Tuning
+from sklearn.model_selection import GridSearchCV
+
+# Define the parameter grid
+param_grid = {
+    'iterations': [500, 1000],
+    'depth': [4, 6, 8],
+    'learning_rate': [0.01, 0.1],
+    'l2_leaf_reg': [1, 3, 5, 7]
+}
+
+# Initialize CatBoost model
+catboost_model = CatBoostRegressor(cat_features=cat_features_index, verbose=0)
+
+# Initialize GridSearchCV
+grid_search = GridSearchCV(estimator=catboost_model, param_grid=param_grid, scoring='neg_mean_squared_error', cv=3, verbose=2)
+
+# Fit GridSearchCV
+grid_search.fit(X_train, y_train)
+
+# Best parameters and best RMSE
+best_params = grid_search.best_params_
+best_rmse = np.sqrt(-grid_search.best_score_)
+
+print(f"Best Parameters: {best_params}")
+print(f"Best RMSE from Grid Search: {best_rmse}")
+Fitting 3 folds for each of 48 candidates, totalling 144 fits
+[CV] END depth=4, iterations=500, l2_leaf_reg=1, learning_rate=0.01; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=1, learning_rate=0.01; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=1, learning_rate=0.01; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=1, learning_rate=0.1; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=1, learning_rate=0.1; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=1, learning_rate=0.1; total time=   4.2s
+[CV] END depth=4, iterations=500, l2_leaf_reg=3, learning_rate=0.01; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=3, learning_rate=0.01; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=3, learning_rate=0.01; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=3, learning_rate=0.1; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=3, learning_rate=0.1; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=3, learning_rate=0.1; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=5, learning_rate=0.01; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=5, learning_rate=0.01; total time=   4.0s
+[CV] END depth=4, iterations=500, l2_leaf_reg=5, learning_rate=0.01; total time=   4.0s
+[CV] END depth=4, iterations=500, l2_leaf_reg=5, learning_rate=0.1; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=5, learning_rate=0.1; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=5, learning_rate=0.1; total time=   4.1s
+[CV] END depth=4, iterations=500, l2_leaf_reg=7, learning_rate=0.01; total time=   4.0s
+[CV] END depth=4, iterations=500, l2_leaf_reg=7, learning_rate=0.01; total time=   4.0s
+[CV] END depth=4, iterations=500, l2_leaf_reg=7, learning_rate=0.01; total time=   4.0s
+[CV] END depth=4, iterations=500, l2_leaf_reg=7, learning_rate=0.1; total time=   4.0s
+[CV] END depth=4, iterations=500, l2_leaf_reg=7, learning_rate=0.1; total time=   4.0s
+[CV] END depth=4, iterations=500, l2_leaf_reg=7, learning_rate=0.1; total time=   4.0s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=1, learning_rate=0.01; total time=   7.9s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=1, learning_rate=0.01; total time=   7.9s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=1, learning_rate=0.01; total time=   7.9s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=1, learning_rate=0.1; total time=   8.0s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=1, learning_rate=0.1; total time=   8.0s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=1, learning_rate=0.1; total time=   8.0s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=3, learning_rate=0.01; total time=   7.9s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=3, learning_rate=0.01; total time=   7.9s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=3, learning_rate=0.01; total time=   7.8s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=3, learning_rate=0.1; total time=   7.9s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=3, learning_rate=0.1; total time=   7.9s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=3, learning_rate=0.1; total time=   7.9s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=5, learning_rate=0.01; total time=   7.8s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=5, learning_rate=0.01; total time=   7.8s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=5, learning_rate=0.01; total time=   7.8s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=5, learning_rate=0.1; total time=   7.9s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=5, learning_rate=0.1; total time=   7.8s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=5, learning_rate=0.1; total time=   7.9s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=7, learning_rate=0.01; total time=   7.7s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=7, learning_rate=0.01; total time=   7.7s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=7, learning_rate=0.01; total time=   7.7s
+[CV] END depth=4, iterations=1000, l2_leaf_reg=7, learning_rate=0.1; total time=   7.8s
+Cross-Validation
+from sklearn.model_selection import cross_val_score
+from sklearn.base import BaseEstimator, RegressorMixin
+from catboost import CatBoostRegressor, Pool
+
+# Wrapper to handle Pool with categorical features in cross-validation
+class CatBoostCVWrapper(BaseEstimator, RegressorMixin):
+    def __init__(self, iterations=1000, learning_rate=0.1, depth=6, cat_features=None):
+        self.iterations = iterations
+        self.learning_rate = learning_rate
+        self.depth = depth
+        self.cat_features = cat_features
+        self.model = None
+
+    def fit(self, X, y):
+        self.model = CatBoostRegressor(iterations=self.iterations, learning_rate=self.learning_rate, depth=self.depth, verbose=100)
+        self.model.fit(Pool(X, y, cat_features=self.cat_features))
+        return self
+
+    def predict(self, X):
+        return self.model.predict(Pool(X, cat_features=self.cat_features))
+
+# Define the model with categorical feature indices
+model_cv = CatBoostCVWrapper(iterations=1000, learning_rate=0.1, depth=6, cat_features=cat_features_index)
+
+# Perform cross-validation
+cv_scores = cross_val_score(model_cv, X, y, cv=5, scoring='neg_mean_squared_error')
+cv_rmse_scores = np.sqrt(-cv_scores)
+
+print(f"Cross-Validation RMSE Scores: {cv_rmse_scores}")
+print(f"Mean CV RMSE: {cv_rmse_scores.mean()}")
+Ensemble Methods - Combining multiple models
+# Ensure categorical features are strings
+categorical_cols = ['communityname', 'unittype']
+df[categorical_cols] = df[categorical_cols].astype(str)
+
+# Ensure no numerical values or NaNs in categorical columns
+for col in categorical_cols:
+    df[col] = df[col].fillna('Unknown').astype(str)
+    df[col] = df[col].apply(lambda x: str(x) if not isinstance(x, str) else x)
+
+# Check the categorical columns
+def check_categorical_columns(df, categorical_cols):
+    for col in categorical_cols:
+        print(f"Column: {col}")
+        print(f"Type: {df[col].dtype}")
+        print(f"Unique Values: {df[col].unique()[:50]}")  # Display the first 10 unique values for brevity
+        print("-" * 40)
+
+check_categorical_columns(df, categorical_cols)
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from xgboost import XGBRegressor
+from catboost import CatBoostRegressor
+from sklearn.metrics import mean_squared_error
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.linear_model import LinearRegression
+
+# Ensure categorical features are strings
+categorical_cols = ['communityname', 'unittype']
+df[categorical_cols] = df[categorical_cols].astype(str)
+
+# Ensure no numerical values or NaNs in categorical columns
+for col in categorical_cols:
+    df[col] = df[col].fillna('Unknown').astype(str)
+    df[col] = df[col].apply(lambda x: str(x) if not isinstance(x, str) else x)
+
+# Check the categorical columns
+def check_categorical_columns(df, categorical_cols):
+    for col in categorical_cols:
+        print(f"Column: {col}")
+        print(f"Type: {df[col].dtype}")
+        print(f"Unique Values: {df[col].unique()[:10]}")  # Display the first 10 unique values for brevity
+        print("-" * 40)
+
+check_categorical_columns(df, categorical_cols)
+
+# Separate feature sets
+X = df.drop(columns=['trailing7dayleads', 'keystonereportingind', 'propertytype', 'cgmgmtstatus', 'propertycd', 
+                'date', 'academicyearbegindate', 'academicyearenddate', 'weekbegindate', 'weekenddate', 'college', 'proximitytocampus', 'vintage'])
+y = df['trailing7dayleads']
+
+# Identify categorical feature indices for CatBoost
+cat_features_index = [X.columns.get_loc(col) for col in categorical_cols]
+
+# One-Hot Encode categorical features for RandomForest and XGBoost
+encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+X_encoded = encoder.fit_transform(X[categorical_cols])
+X_other = X.drop(columns=categorical_cols)
+X_rf_xgb = np.hstack((X_other, X_encoded))
+
+# Train-Test Split for both feature sets
+X_train_rf_xgb, X_test_rf_xgb, y_train, y_test = train_test_split(X_rf_xgb, y, test_size=0.2, random_state=42)
+X_train_catboost, X_test_catboost, _, _ = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Double-checking data types for CatBoost
+print("CatBoost Data Types Check")
+for col in categorical_cols:
+    print(f"CatBoost Column: {col}, Type: {X_train_catboost[col].dtype}, Unique Values: {X_train_catboost[col].unique()[:10]}")
+
+# Initialize models
+catboost_model = CatBoostRegressor(iterations=1000, learning_rate=0.1, depth=6, cat_features=cat_features_index, verbose=0)
+rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+xgb_model = XGBRegressor(n_estimators=1000, learning_rate=0.1, max_depth=6, random_state=42)
+
+# Train individual models
+catboost_model.fit(X_train_catboost, y_train)
+rf_model.fit(X_train_rf_xgb, y_train)
+xgb_model.fit(X_train_rf_xgb, y_train)
+
+# Generate predictions for the training set
+train_preds_catboost = catboost_model.predict(X_train_catboost)
+train_preds_rf = rf_model.predict(X_train_rf_xgb)
+train_preds_xgb = xgb_model.predict(X_train_rf_xgb)
+
+# Generate predictions for the test set
+test_preds_catboost = catboost_model.predict(X_test_catboost)
+test_preds_rf = rf_model.predict(X_test_rf_xgb)
+test_preds_xgb = xgb_model.predict(X_test_rf_xgb)
+
+# Stack predictions
+train_stack = np.column_stack((train_preds_catboost, train_preds_rf, train_preds_xgb))
+test_stack = np.column_stack((test_preds_catboost, test_preds_rf, test_preds_xgb))
+
+# Train meta-learner
+meta_learner = LinearRegression()
+meta_learner.fit(train_stack, y_train)
+
+# Predict with meta-learner
+y_pred_ensemble = meta_learner.predict(test_stack)
+
+# Model Evaluation
+mse_ensemble = mean_squared_error(y_test, y_pred_ensemble)
+rmse_ensemble = np.sqrt(mse_ensemble)
+
+print(f"RMSE of Ensemble Model: {rmse_ensemble}")
+# Add predictions to the original dataframe
+df_test = df.loc[X_test_catboost.index].copy()
+df_test['predictedweeklyleads'] = y_pred_ensemble
+
+# Merge predictions back into the original dataframe
+df_combined = df.copy()
+df_combined.loc[df_test.index, 'predictedweeklyleads'] = df_test['predictedweeklyleads']
+
+# Display the updated dataframe with predictions
+df_combined.head()
+domo.write_dataframe(df_combined, 'WeeklyLeadPredictions')
+ 
