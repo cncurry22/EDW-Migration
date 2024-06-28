@@ -1,0 +1,358 @@
+/*
+WITH flagged_data AS (
+    SELECT 
+        DATE_TRUNC('week', pr.updated)::DATE AS AsOfDate,
+        sc.name AS college,
+        prop.milesToClosestCampus AS "ProximitytoCampus",
+        (CASE 
+                WHEN TRIM(prop.yearBuilt) ~ '^[0-9]+$' THEN prop.yearBuilt::INTEGER
+                ELSE 0
+            END) AS "Vintage",
+        trn."impact",
+        prop.name AS "CommunityName",
+        prop.totalbeds AS "TotalCommunityBeds",
+        CAST(pn.beds AS VARCHAR) || 'BR/' || CAST(pn.baths AS VARCHAR) || 'BA' AS "UnitType",
+        pn.name AS "FloorplanName",
+        pr.rate, 
+        pr.totalBeds,
+        pr.prelease, 
+        pr.occupancy,
+        LAG(pr.rate) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) AS prev_rate,
+        LEAD(pr.rate) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) AS next_rate,
+        LAG(pr.prelease) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) AS prev_prelease,
+        LEAD(pr.prelease) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) AS next_prelease,
+        LAG(pr.occupancy) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) AS prev_occupancy,
+        LEAD(pr.occupancy) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) AS next_occupancy,
+        CASE 
+            WHEN pr.rate < 100
+                AND LAG(pr.rate) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) > 100
+                AND LEAD(pr.rate) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) > 100            
+            THEN 1 
+            ELSE 0 
+        END AS rate_not_updated,
+        CASE 
+            WHEN pr.prelease = 0 
+                AND LAG(pr.prelease) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) > 0 
+                AND LEAD(pr.prelease) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) > 0  
+            THEN 1 ELSE 0 
+        END AS prelease_not_updated,
+        CASE 
+            WHEN pr.occupancy = 0 
+                AND LAG(pr.occupancy) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) > 0
+                AND LEAD(pr.occupancy) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) > 0 
+            THEN 1 ELSE 0 
+        END AS occupancy_not_updated,
+        CASE 
+            WHEN pr.rate IS NULL 
+                OR pr.prelease IS NULL 
+                OR pr.occupancy IS NULL 
+            THEN 1
+            WHEN pr.rate < 100
+                AND LAG(pr.rate) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) < 100
+                AND LEAD(pr.rate) OVER (PARTITION BY prop.name, pn.name ORDER BY pr.updated) < 100 
+            THEN 1
+            ELSE 0
+        END AS invalid_record,
+        pr."is_from_cardinal"
+    FROM "rpt_plan_reports_cardinal" pr
+    INNER JOIN "rpt_plans_cardinal" pn ON pr.planKey = pn.KEY
+    INNER JOIN "rpt_properties_cardinal" prop ON pn.propertyKey = prop.KEY
+    LEFT JOIN "collegehousemarketcompetitormapping" mp ON prop.KEY = mp."CH key"
+    LEFT JOIN "gcp_terrain_psql_reporting_trn_community_vw" trn ON mp."Terrain Name" = trn."property_name_comp"
+    INNER JOIN "rpt_schools_cardinal" sc ON ABS(SQRT(POW(69.1 * (prop.latitude - sc.latitude), 2) + POW(69.1 * (prop.longitude - sc.longitude) * COS(sc.latitude / 57.3), 2))) - prop.milesToClosestCampus < 0.05
+    WHERE pr."isSyndicated" + pr."is_from_cardinal" > 0
+        AND DATE_TRUNC('week', pr.updated)::DATE > '20210801'
+),
+corrected_data AS (
+    SELECT 
+        AsOfDate,
+        college,
+        "ProximitytoCampus",
+        "Vintage",
+        "CommunityName",
+        "TotalCommunityBeds",
+        "UnitType",
+        "FloorplanName",
+        rate,
+        prelease,
+        occupancy,
+        prev_rate,
+        next_rate,
+        prev_prelease,
+        next_prelease,
+        prev_occupancy,
+        next_occupancy,
+        rate_not_updated,
+        prelease_not_updated,
+        occupancy_not_updated,
+        "impact",
+  		"is_from_cardinal",
+        CASE 
+            WHEN rate_not_updated = 1 
+                AND prev_rate IS NOT NULL 
+                AND next_rate IS NOT NULL 
+                AND (LEAD(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate) - LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate)) != 0
+            THEN prev_rate + (next_rate - prev_rate) / NULLIF((LEAD(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate) - LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate)), 0) * (DATEDIFF('week', LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate), AsOfDate))
+            ELSE rate
+        END AS filled_rate,
+        CASE 
+            WHEN prelease_not_updated = 1 
+                AND prev_prelease IS NOT NULL 
+                AND next_prelease IS NOT NULL 
+                AND (LEAD(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate) - LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate)) != 0
+            THEN prev_prelease + (next_prelease - prev_prelease) / NULLIF((LEAD(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate) - LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate)), 0) * (DATEDIFF('week', LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate), AsOfDate))
+            ELSE prelease
+        END AS filled_prelease,
+        CASE 
+            WHEN occupancy_not_updated = 1 
+                AND prev_occupancy IS NOT NULL 
+                AND next_occupancy IS NOT NULL 
+                AND (LEAD(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate) - LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate)) != 0
+            THEN prev_occupancy + (next_occupancy - prev_occupancy) / NULLIF((LEAD(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate) - LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate)), 0) * (DATEDIFF('week', LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate), AsOfDate))
+            ELSE occupancy
+        END AS filled_occupancy,
+        DATEDIFF('week', LAG(AsOfDate) OVER (PARTITION BY "CommunityName", "FloorplanName" ORDER BY AsOfDate), AsOfDate) AS weeks_between
+    FROM flagged_data
+    WHERE invalid_record = 0
+)
+SELECT * FROM corrected_data
+ORDER BY AsOfDate DESC, "CommunityName" ASC, "UnitType" ASC, "FloorplanName" ASC;
+
+*/
+WITH market_stats AS (
+    SELECT 
+        DATE_TRUNC('week', pr.updated)::DATE AS "AsOfDate",
+        sc.name AS college,
+        CAST(pn.beds AS VARCHAR) || 'BR/' || CAST(pn.baths AS VARCHAR) || 'BA' AS "UnitType",
+        AVG(prop.totalbeds) AS "avg_marketbeds",
+        STDDEV(prop.totalbeds) AS "stddev_marketbeds",
+        AVG(prop.milesToClosestCampus) AS "avg_marketproximity",
+        STDDEV(prop.milesToClosestCampus) AS "stddev_marketproximity",
+        AVG(CASE 
+                WHEN TRIM(prop.yearBuilt) ~ '^[0-9]+$' THEN prop.yearBuilt::INTEGER
+                ELSE 0
+            END) AS "avg_marketvintage",
+        STDDEV(CASE 
+                WHEN TRIM(prop.yearBuilt) ~ '^[0-9]+$' THEN prop.yearBuilt::INTEGER
+                ELSE 0
+            END) AS "stddev_marketvintage",
+        SUM(pn.areaSF * pr.totalbeds) / NULLIF(SUM(pr.totalbeds), 0) AS "avg_marketsqft",
+        STDDEV(pn.areaSF) AS "stddev_marketsqft",
+        SUM(pr.rate * pr.totalbeds) / NULLIF(SUM(pr.totalbeds), 0) AS "avg_marketrate",
+        STDDEV(pr.rate) AS "stddev_marketrate",
+        SUM(pr.prelease * pr.totalbeds) / NULLIF(SUM(pr.totalbeds), 0) AS "avg_marketprelease",
+        STDDEV(pr.prelease) AS "stddev_marketprelease",
+        SUM(pr.occupancy * pr.totalbeds) / NULLIF(SUM(pr.totalbeds), 0) AS "avg_marketoccupancy",
+        STDDEV(pr.occupancy) AS "stddev_marketoccupancy"
+    FROM "rpt_plan_reports_cardinal" pr
+    INNER JOIN "rpt_plans_cardinal" pn ON pr.planKey = pn.KEY
+    INNER JOIN "rpt_properties_cardinal" prop ON pn.propertyKey = prop.KEY
+    LEFT JOIN "collegehousemarketcompetitormapping" mp ON prop.KEY = mp."CH key"
+    LEFT JOIN "gcp_terrain_psql_reporting_trn_community_vw" trn ON mp."Terrain Name" = trn."property_name_comp"
+    INNER JOIN "rpt_schools_cardinal" sc ON ABS(SQRT(POW(69.1 * (prop.latitude - sc.latitude), 2) + POW(69.1 * (prop.longitude - sc.longitude) * COS(sc.latitude / 57.3), 2))) - prop.milesToClosestCampus < 0.05
+    WHERE (CASE 
+     		WHEN pr."is_from_cardinal" = 1 
+     			THEN 1
+     		WHEN pr."is_from_cardinal" = 0 AND pr."isSyndicated" = 1
+     			THEN 1
+     		ELSE 0
+     	   END) = 1
+  	GROUP BY DATE_TRUNC('week', pr.updated)::DATE, sc.name, CAST(pn.beds AS VARCHAR) || 'BR/' || CAST(pn.baths AS VARCHAR) || 'BA'
+),
+t1 AS (
+    SELECT 
+        DATE_TRUNC('week', pr.updated)::DATE AS "AsOfDate",
+        sc.name AS college,
+        prop.name AS "CommunityName",
+        prop.totalbeds AS "TotalCommunityBeds",
+        CAST(pn.beds AS VARCHAR) || 'BR/' || CAST(pn.baths AS VARCHAR) || 'BA' AS "UnitType",
+        SUM(pr.totalBeds) AS "TotalUnitBeds",
+        MAX(pr."hasConcessions") AS "UnitConcesionInd",
+        MAX(prop.milesToClosestCampus) AS "ProximitytoCampus",
+        AVG(CASE 
+                WHEN TRIM(prop.yearBuilt) ~ '^[0-9]+$' THEN prop.yearBuilt::INTEGER
+                ELSE 0
+            END) AS "Vintage",
+        SUM(pn.areaSF * pr.totalbeds) / NULLIF(SUM(pr.totalbeds), 0) AS "AvgUnitSqFt",
+        SUM(pr.rate * pr.totalbeds) / NULLIF(SUM(pr.totalbeds), 0) AS "AvgUnitRate",
+        (SUM(pr.prelease * pr.totalbeds) / NULLIF(SUM(pr.totalbeds), 0)) * 100 AS "UnitPrelease",
+        (SUM(pr.occupancy * pr.totalbeds) / NULLIF(SUM(pr.totalbeds), 0)) * 100 AS "UnitOccupancy",
+        AVG(pr."is_from_cardinal") AS "is_from_cardinal"
+    FROM "rpt_plan_reports_cardinal" pr
+    INNER JOIN "rpt_plans_cardinal" pn ON pr.planKey = pn.KEY
+    INNER JOIN "rpt_properties_cardinal" prop ON pn.propertyKey = prop.KEY
+    LEFT JOIN "collegehousemarketcompetitormapping" mp ON prop.KEY = mp."CH key"
+    LEFT JOIN "gcp_terrain_psql_reporting_trn_community_vw" trn ON mp."Terrain Name" = trn."property_name_comp"
+    INNER JOIN "rpt_schools_cardinal" sc ON ABS(SQRT(POW(69.1 * (prop.latitude - sc.latitude), 2) + POW(69.1 * (prop.longitude - sc.longitude) * COS(sc.latitude / 57.3), 2))) - prop.milesToClosestCampus < 0.05
+    WHERE (CASE 
+     		WHEN pr."is_from_cardinal" = 1 
+     			THEN 1
+     		WHEN pr."is_from_cardinal" = 0 AND pr."isSyndicated" = 1
+     			THEN 1
+     		ELSE 0
+     	   END) = 1
+  	GROUP BY DATE_TRUNC('week', pr.updated)::DATE, sc.name, prop.name, prop.totalbeds, CAST(pn.beds AS VARCHAR) || 'BR/' || CAST(pn.baths AS VARCHAR) || 'BA'
+),
+z_scores AS (
+    SELECT 
+        t1."AsOfDate",
+        t1.college,
+        t1."CommunityName",
+        t1."TotalCommunityBeds",
+        t1."UnitType",
+        t1."TotalUnitBeds",
+        t1."UnitConcesionInd",
+        t1."ProximitytoCampus",
+        t1."Vintage",
+        t1."AvgUnitSqFt",
+        t1."AvgUnitRate",
+        t1."UnitPrelease",
+        t1."UnitOccupancy",
+        t1."is_from_cardinal",
+        (t1."TotalCommunityBeds" - ms."avg_marketbeds") / NULLIF(ms."stddev_marketbeds", 0) AS "z_score_marketbeds",
+        (t1."ProximitytoCampus" - ms."avg_marketproximity") / NULLIF(ms."stddev_marketproximity", 0) AS "z_score_marketproximity",
+        (t1."Vintage" - ms."avg_marketvintage") / NULLIF(ms."stddev_marketvintage", 0) AS "z_score_marketvintage",
+        (t1."AvgUnitSqFt" - ms."avg_marketsqft") / NULLIF(ms."stddev_marketsqft", 0) AS "z_score_marketsqft",
+        (t1."AvgUnitRate" - ms."avg_marketrate") / NULLIF(ms."stddev_marketrate", 0) AS "z_score_marketrate",
+        (t1."UnitPrelease" - ms."avg_marketprelease") / NULLIF(ms."stddev_marketprelease", 0) AS "z_score_marketprelease",
+        (t1."UnitOccupancy" - ms."avg_marketoccupancy") / NULLIF(ms."stddev_marketoccupancy", 0) AS "z_score_marketoccupancy"
+    FROM t1
+    JOIN market_stats ms 
+        ON t1."AsOfDate" = ms."AsOfDate" 
+        AND t1.college = ms.college 
+        AND t1."UnitType" = ms."UnitType"
+),
+overall_z_scores AS (
+    SELECT 
+        "AsOfDate",
+        college,
+        "CommunityName",
+        "TotalCommunityBeds",
+        "UnitType",
+        "TotalUnitBeds",
+        "UnitConcesionInd",
+        "ProximitytoCampus",
+        "Vintage",
+        "AvgUnitSqFt",
+        "AvgUnitRate",
+        "UnitPrelease",
+        "UnitOccupancy",
+        "is_from_cardinal",
+        AVG(z_score_marketbeds) AS z_score_marketbeds,
+        AVG(z_score_marketproximity) AS z_score_marketproximity,
+        AVG(z_score_marketvintage) AS z_score_marketvintage,
+        AVG(z_score_marketsqft) AS z_score_marketsqft,
+        AVG(z_score_marketrate) AS z_score_marketrate,
+        AVG(z_score_marketprelease) AS z_score_marketprelease,
+        AVG(z_score_marketoccupancy) AS z_score_marketoccupancy,
+        -- Aggregate individual z-scores to calculate an overall z-score
+        (AVG(z_score_marketbeds) 
+        + AVG(z_score_marketproximity) 
+        + AVG(z_score_marketvintage) 
+        + AVG(z_score_marketsqft) 
+        + AVG(z_score_marketrate) 
+        + AVG(z_score_marketprelease) 
+        + AVG(z_score_marketoccupancy)) / 7 AS overall_z_score
+    FROM z_scores
+    GROUP BY 
+        "AsOfDate",
+        college,
+        "CommunityName",
+        "TotalCommunityBeds",
+        "UnitType",
+        "TotalUnitBeds",
+        "UnitConcesionInd",
+        "ProximitytoCampus",
+        "Vintage",
+        "AvgUnitSqFt",
+        "AvgUnitRate",
+        "UnitPrelease",
+        "UnitOccupancy",
+        "is_from_cardinal"
+),
+ranked_communities AS (
+    SELECT 
+        college,
+        "CommunityName",
+        MAX("TotalCommunityBeds") AS "TotalCommunityBeds",
+        MAX("ProximitytoCampus") AS "ProximitytoCampus",
+        MAX("Vintage") AS "Vintage",
+        AVG("AvgUnitSqFt") AS "AvgUnitSqFt",
+        AVG("AvgUnitRate") AS "AvgUnitRate",
+        AVG("UnitPrelease") AS "UnitPrelease",
+        AVG("UnitOccupancy") AS "UnitOccupancy",
+        MAX(overall_z_score) AS overall_z_score,
+        -- Rank communities based on overall z-score within each market (college)
+        RANK() OVER (PARTITION BY college ORDER BY MAX(overall_z_score) DESC) AS community_rank
+    FROM overall_z_scores
+    GROUP BY college, "CommunityName"
+),
+breakpoints AS (
+    SELECT 
+        college,
+        MAX(community_rank) AS max_rank,
+        -- Determine the ranks that will serve as breakpoints for the three groups
+        (MAX(community_rank) / 3) AS rank_break_1,
+        (2 * MAX(community_rank) / 3) AS rank_break_2
+    FROM ranked_communities
+    GROUP BY college
+),
+community_groups AS (
+    SELECT 
+        rc.college,
+        rc."CommunityName",
+        rc."TotalCommunityBeds",
+        rc."ProximitytoCampus",
+        rc."Vintage",
+        rc."AvgUnitSqFt",
+        rc."AvgUnitRate",
+        rc."UnitPrelease",
+        rc."UnitOccupancy",
+        rc.overall_z_score,
+        rc.community_rank,
+        -- Assign groups based on the breakpoints
+        CASE 
+            WHEN rc.community_rank <= bp.rank_break_1 THEN '1'
+            WHEN rc.community_rank <= bp.rank_break_2 THEN '2'
+            ELSE '3'
+        END AS CommunityGroup
+    FROM ranked_communities rc
+    JOIN breakpoints bp ON rc.college = bp.college
+)
+/*
+SELECT 
+    cg.college,
+    cg."CommunityName",
+    cg.community_group,
+    t1."UnitType",
+    t1."AvgUnitSqFt",
+    t1."AvgUnitRate",
+    t1."UnitPrelease",
+    t1."UnitOccupancy",
+    ms."avg_marketsqft",
+    ms."avg_marketrate",
+    ms."avg_marketprelease",
+    ms."avg_marketoccupancy",
+    -- Identify whether the unit type is appropriate to compare
+    CASE 
+        WHEN t1."AvgUnitSqFt" BETWEEN ms."avg_marketsqft" * 0.9 AND ms."avg_marketsqft" * 1.1 
+        AND t1."AvgUnitRate" BETWEEN ms."avg_marketrate" * 0.9 AND ms."avg_marketrate" * 1.1 
+        AND t1."UnitPrelease" BETWEEN ms."avg_marketprelease" * 0.9 AND ms."avg_marketprelease" * 1.1 
+        AND t1."UnitOccupancy" BETWEEN ms."avg_marketoccupancy" * 0.9 AND ms."avg_marketoccupancy" * 1.1 
+        THEN 'Appropriate'
+        ELSE 'Not Appropriate'
+    END AS comparison_appropriateness
+FROM community_groups cg
+JOIN t1 ON cg.college = t1.college AND cg."CommunityName" = t1."CommunityName"
+JOIN market_stats ms ON t1.college = ms.college AND t1."UnitType" = ms."UnitType"
+WHERE t1."is_from_cardinal" = 1
+ORDER BY cg.college, cg."CommunityName", t1."UnitType";
+*/
+SELECT t1.*
+	, cg.CommunityGroup
+    , COUNT(t1."CommunityName") OVER (PARTITION BY t1."college", cg.CommunityGroup ORDER BY t1."asofdate" ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "CommunitiesInGroup"
+FROM t1
+JOIN community_groups cg 
+	ON t1.college = cg.college
+    	AND t1.CommunityName = cg.CommunityName
+ORDER BY t1."asofdate" DESC, t1."college" ASC, t1."communityname" ASC, t1."unittype" ASC
