@@ -1,0 +1,115 @@
+import domojupyter as domo
+df = domo.read_dataframe('Dataset for Hierarchical Clustering Analysis', query = "SELECT * FROM table WHERE communityname = '12 North'")
+import pandas as pd
+from sqlalchemy import create_engine
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import AgglomerativeClustering
+from scipy.cluster.hierarchy import linkage, fcluster
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Drop rows with NULL values
+df.dropna(inplace=True)
+
+# Data Preprocessing
+aggregated_data = df.groupby(['communityname', 'bedroomcnt', 'bathroomcnt', 'floorplanname']).agg({
+    'rentablebedcnt': 'first',  # Static measure
+    'sqftperbed': 'first',      # Static measure
+    'occupiedbedcnt': 'mean',   # Dynamic measure
+    'netpreleasedbedspacecnt': 'mean',  # Dynamic measure
+    'askingrate': 'mean',       # Dynamic measure
+    'leasedrate': 'mean',       # Dynamic measure
+    'date': 'count'             # Dynamic measure
+}).reset_index()
+aggregated_data = aggregated_data.rename(columns={'date': 'count_records'})
+
+# Feature Engineering
+aggregated_data['occupied_rate'] = aggregated_data['occupiedbedcnt'] / aggregated_data['rentablebedcnt']
+aggregated_data['preleased_rate'] = aggregated_data['netpreleasedbedspacecnt'] / aggregated_data['rentablebedcnt']
+aggregated_data['rate_difference'] = aggregated_data['askingrate'] - aggregated_data['leasedrate']
+
+# Function to perform clustering within each communityname
+def cluster_within_community(community_data):
+    # Select features to be standardized
+    features = community_data[['rentablebedcnt', 'sqftperbed', 'occupied_rate', 'preleased_rate', 'rate_difference', 'count_records']]
+    
+    # Standardize the features
+    scaler = StandardScaler()
+    scaled_features = scaler.fit_transform(features)
+    
+    # Determine the optimal number of clusters using the elbow method
+    linked = linkage(scaled_features, method='ward')
+    max_clusters = 10
+    wcss = []
+    for i in range(1, max_clusters + 1):
+        clusters = fcluster(linked, i, criterion='maxclust')
+        wcss.append(sum(np.min(np.linalg.norm(scaled_features - np.mean(scaled_features[clusters == k], axis=0), axis=1)**2) for k in range(1, i+1)))
+    
+    # Plot the WCSS to find the elbow point
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(1, max_clusters + 1), wcss, marker='o')
+    plt.xlabel('Number of Clusters')
+    plt.ylabel('WCSS')
+    plt.title(f'Elbow Method For Optimal Number of Clusters for {community_data["communityname"].iloc[0]}')
+    plt.show()
+    
+    # Apply hierarchical clustering with the optimal number of clusters
+    optimal_clusters = 3  # Replace with the number of clusters identified from the elbow method
+    cluster_model = AgglomerativeClustering(n_clusters=optimal_clusters)
+    clusters = cluster_model.fit_predict(scaled_features)
+    
+    community_data['cluster_id'] = clusters
+    return community_data
+
+# Apply clustering within each communityname
+clustered_data_list = []
+for community, community_data in aggregated_data.groupby('communityname'):
+    clustered_data = cluster_within_community(community_data)
+    clustered_data_list.append(clustered_data)
+
+# Combine all clustered data
+final_clustered_data = pd.concat(clustered_data_list)
+
+# Cluster Validation
+overlap_check = final_clustered_data.groupby('cluster_id')['communityname'].nunique()
+overlapping_clusters = overlap_check[overlap_check > 1]
+if not overlapping_clusters.empty:
+    print("Overlapping clusters found:")
+    print(overlapping_clusters)
+else:
+    print("No overlapping clusters.")
+No description has been provided for this image
+No overlapping clusters.
+# Since we dropped rows with NULL values, won't that create some underrepresentation since count_records is a feature?
+domo.write_dataframe(final_clustered_data, 'CommunityUnitMixClustering')
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+/home/domo/.conda/lib/python3.9/site-packages/domojupyter/io.py:125: FutureWarning: Series.__getitem__ treating keys as positions is deprecated. In a future version, integer keys will always be treated as labels (consistent with DataFrame behavior). To access a value by position, use `ser.iloc[pos]`
+  columns = [{'name': column, 'type': _convert_type(df.dtypes[ind].name)} for ind, column in enumerate(df.columns)]
+ 
