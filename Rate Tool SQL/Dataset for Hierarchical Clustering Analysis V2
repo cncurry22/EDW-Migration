@@ -1,0 +1,157 @@
+ WITH t1 AS (
+    SELECT 
+        ccl."Date",
+        DATE_TRUNC('week', ccl."Date")::DATE AS week_start,
+  		sc."name" AS "College",
+        ccl."CommunityName",
+  		prop.totalbeds AS "TotalCommunityBeds",
+        prop.milesToClosestCampus AS "ProximitytoCampus",
+        (CASE 
+                WHEN TRIM(prop.yearBuilt) ~ '^[0-9]+$'
+                    THEN prop.yearBuilt::INTEGER
+                ELSE 0
+                END) AS "Vintage",
+        CAST(ccl."BedroomCnt" AS VARCHAR) || 'BR/' || CAST(ccl."BathroomCnt" AS VARCHAR) || 'BA' AS "UnitType",
+        ccl."FloorplanName",
+        (CASE 
+        	WHEN ccl."OneTimeConcessionAmtUSD" IS NOT NULL THEN 1
+         	WHEN ccl."RecurringConcessionAmtUSD" IS NOT NULL THEN 1
+         	ELSE 0
+         END) AS "FloorplanConcessionInd",
+        oc."RentableBedCnt" AS "TotalFloorplanBeds",
+        oc."SqFtPerBed",
+        (oc."OccupiedBedCnt" / oc."RentableBedCnt") * 100 AS "Occupancy" ,
+        (COALESCE(ccl."NetPreleasedBedSpaceCnt", 0) / oc."RentableBedCnt") * 100 AS "Prelease",
+        (sus."SustainableBeds" - COALESCE(ccl."NetPreleasedBedSpaceCnt", 0)) - (sus."SustainableBeds" - LAG(COALESCE(ccl."NetPreleasedBedSpaceCnt", 0), 1) OVER (PARTITION BY ccl."CommunityName", ccl."FloorplanName" ORDER BY ccl."Date")) AS "DailyChangeLefttoLease",
+        (crr."monthly_asking_rent" * crr."bed_count") / NULLIF(crr."bed_count", 0) AS "AskingRate",
+        lr."LeasedRate",
+		lr."LeasedRate" - LAG(lr."LeasedRate", 1) OVER (PARTITION BY ccl."CommunityName", ccl."FloorplanName" ORDER BY ccl."Date") AS "DailyLeasedRateChange",
+  		lr."EffectiveRate",
+        COALESCE(((crr."monthly_asking_rent" * crr."bed_count") / NULLIF(crr."bed_count", 0)) - (ccl."NewLeaseMonthlyEffectiveRentUSD" / NULLIF(ccl."NetNewPreleasedBedSpaceCnt",0)),0) AS "RateCompliance"
+    FROM "cumulative_community_pre_leasing_summary_student" ccl
+    LEFT JOIN "community_floorplan_occupancy" oc
+        ON ccl."Date" = oc."Date"
+        AND ccl."CommunityName" = oc."CommunityName"
+        AND ccl."FloorplanName" = oc."FloorplanName"
+    LEFT JOIN "gcp_entrata_reporting_cumulative_rental_rate_summary_vw" crr
+        ON ccl."Date" = crr."as_of_date"
+        AND ccl."PropertyCd" = crr."external_id"
+        AND ccl."FloorplanName" = crr."floorplan_name"
+  	INNER JOIN (
+      SELECT "CommunityName"
+      	, "FloorplanName"
+      	, MAX("NetPreleasedBedSpaceCnt") AS "SustainableBeds"
+      FROM "cumulative_community_pre_leasing_summary_student" 
+      GROUP BY "CommunityName"
+      	, "FloorplanName"
+      ) sus ON ccl."CommunityName" = sus."CommunityName" AND ccl."FloorplanName" = sus."FloorplanName"
+    INNER JOIN (
+      SELECT "Date"
+      	, "CommunityName"
+      	, "FloorplanName"
+      	, "SignedMonthlyRentUSD" / NULLIF("NetPreleasedBedSpaceCnt", 0) AS "LeasedRate"
+      	, "MonthlyEffectiveRentUSD" / NULLIF("NetPreleasedBedSpaceCnt", 0) AS "EffectiveRate"
+      FROM "cumulative_community_pre_leasing_summary_student"
+      ) lr ON ccl."Date" = lr."Date" AND ccl."CommunityName" = lr."CommunityName" AND ccl."FloorplanName" = lr."FloorplanName"      
+    LEFT JOIN "collegehousemarketcompetitormapping" ch 
+  		ON ccl."PropertyCd" = ch."Yardi ID"
+  	LEFT JOIN "rpt_properties_cardinal" prop 
+  		ON ch."CH key" = prop."key"
+  	LEFT JOIN "rpt_schools_cardinal" sc 
+  		ON ABS(SQRT(POW(69.1 * (prop.latitude - sc.latitude), 2) + POW(69.1 * (prop.longitude - sc.longitude) * COS(sc.latitude / 57.3), 2))) - prop.milesToClosestCampus < 0.05 -- making sure the properties coordinates - college coordinates = stated proximity to campus    
+    WHERE 
+        ccl."KeystoneReportingInd" = 'true'
+        AND ccl."CGMgmtStatus" = 'Current'
+        AND ccl."PropertyType" = 'Student'
+        AND CAST(SPLIT_PART(ccl."AcademicYear", '/', 1) AS INTEGER) >= 2023
+        AND ccl."MonthOfYear" != 9
+    ORDER BY ccl."Date" DESC 
+    	, ccl."CommunityName" ASC 
+        , "UnitType" ASC 
+        , ccl."FloorplanName" ASC
+  ),
+weekly_aggregated AS (
+    SELECT
+        week_start,
+        "CommunityName",
+        "UnitType",
+        "FloorplanName",
+        AVG("Occupancy") AS avg_occupancy,
+  		AVG("Prelease") AS avg_prelease,
+        AVG("DailyChangeLefttoLease") AS avg_weekly_change_lefttolease,
+        AVG("AskingRate") AS avg_askingrate,
+        AVG("LeasedRate") AS avg_leasedrate,
+  		AVG("EffectiveRate") AS avg_effectiverate,
+  		AVG("DailyLeasedRateChange") AS avg_weekly_leased_rate_change,
+        AVG("RateCompliance") AS avg_ratecompliance,
+        MAX("TotalFloorplanBeds") AS max_totalfloorplanbeds,
+        MAX("SqFtPerBed") AS max_sqftperbed,
+  		AVG("FloorplanConcessionInd") AS max_floorplanconcessionind,
+  		MAX("Vintage") AS max_vintage,
+  		MAX("ProximitytoCampus") AS max_proximitytocampus,
+  		MAX("TotalCommunityBeds") AS max_totalcommunitybeds
+    FROM t1
+    GROUP BY 
+        week_start,
+        "CommunityName",
+        "UnitType",
+        "FloorplanName"
+),
+metrics_stats AS (
+    SELECT 
+        "CommunityName",
+        "UnitType",
+        "FloorplanName",
+        AVG(avg_occupancy) AS avg_occupancy,
+        STDDEV(avg_occupancy) AS stddev_occupancy,
+        AVG(avg_weekly_change_lefttolease) AS avg_weekly_change_lefttolease,
+        STDDEV(avg_weekly_change_lefttolease) AS stddev_weekly_change_lefttolease,
+        AVG(avg_askingrate) AS avg_askingrate,
+        STDDEV(avg_askingrate) AS stddev_askingrate,
+        AVG(avg_leasedrate) AS avg_leasedrate,
+        STDDEV(avg_leasedrate) AS stddev_leasedrate,
+        AVG(avg_weekly_leased_rate_change) AS avg_weekly_leased_rate_change,
+        STDDEV(avg_weekly_leased_rate_change) AS stddev_weekly_leased_rate_change,
+        AVG(avg_ratecompliance) AS avg_ratecompliance,
+        STDDEV(avg_ratecompliance) AS stddev_ratecompliance
+    FROM weekly_aggregated
+    GROUP BY "CommunityName", "UnitType", "FloorplanName"
+),
+normalized_data AS (
+    SELECT 
+        wa.week_start AS "Date",
+  		t1."College",
+        wa."CommunityName",
+		wa.max_totalcommunitybeds AS "TotalCommunityBeds",
+        wa."UnitType",
+        wa."FloorplanName",
+  		wa.max_floorplanconcessionind AS "FloorplanConcessionInd",
+        wa.max_totalfloorplanbeds AS "TotalFloorplanBeds",
+        wa.max_sqftperbed AS "SqFtPerBed",
+        wa.avg_occupancy AS "Occupancy",
+  		wa.avg_prelease AS "Prelease",
+        wa.avg_weekly_change_lefttolease AS "WeeklyChangeLefttoLease",
+        wa.avg_askingrate AS "AskingRate",
+        wa.avg_leasedrate AS "LeasedRate",
+  		wa.avg_effectiverate AS "EffectiveRate",
+  		wa.avg_weekly_leased_rate_change AS "WeeklyLeasedRateChange",
+        wa.avg_ratecompliance AS "RateCompliance",
+        COALESCE((wa.avg_weekly_change_lefttolease - ms.avg_weekly_change_lefttolease) / NULLIF(ms.stddev_weekly_change_lefttolease, 0),0) AS normalized_weekly_change_lefttolease,
+        COALESCE((wa.avg_occupancy - ms.avg_occupancy) / NULLIF(ms.stddev_occupancy, 0),0) AS normalized_occupancy,
+        COALESCE((wa.avg_askingrate - ms.avg_askingrate) / NULLIF(ms.stddev_askingrate, 0),0) AS normalized_askingrate,
+        COALESCE((wa.avg_leasedrate - ms.avg_leasedrate) / NULLIF(ms.stddev_leasedrate, 0),0) AS normalized_leasedrate,
+  		COALESCE((wa.avg_weekly_leased_rate_change - ms.avg_weekly_leased_rate_change) / NULLIF(ms.stddev_weekly_leased_rate_change, 0),0) AS normalized_weekly_leased_rate_change,
+        COALESCE((wa.avg_ratecompliance - ms.avg_ratecompliance) / NULLIF(ms.stddev_ratecompliance, 0),0) AS normalized_ratecompliance
+    FROM weekly_aggregated wa
+    JOIN metrics_stats ms
+        ON wa."CommunityName" = ms."CommunityName"
+        AND wa."UnitType" = ms."UnitType"
+        AND wa."FloorplanName" = ms."FloorplanName"
+  	JOIN t1 
+        ON wa."CommunityName" = t1."CommunityName"
+        AND wa."UnitType" = t1."UnitType"
+        AND wa."FloorplanName" = t1."FloorplanName"
+        AND wa.week_start = t1.week_start
+  )
+SELECT * FROM normalized_data
+ORDER BY "Date" DESC, "CommunityName" ASC, "UnitType" ASC, "FloorplanName" ASC;
