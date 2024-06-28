@@ -1,0 +1,529 @@
+WITH sustainablebeds
+AS (
+    SELECT "CommunityName"
+        , "UnitType"
+        , MAX("NetNewPreleasedBedSpaceCnt") AS "NewLeaseSustainableCap"
+        , MAX("NetRenewalPreleasedBedSpaceCnt") AS "RenewalLeaseSustainableCap"
+    FROM (
+        SELECT "Date"
+            , "CommunityName"
+            , "BedroomCnt"
+            , "BathroomCnt"
+            , CAST("BedroomCnt" AS VARCHAR) || 'BR/' || CAST("BathroomCnt" AS VARCHAR) || 'BA' AS "UnitType"
+            , SUM("NetNewPreleasedBedSpaceCnt") AS "NetNewPreleasedBedSpaceCnt"
+            , (SUM("NetRenewalStayPreleasedBedSpaceCnt") + SUM("NetRenewalTransferPreleasedBedSpaceCnt")) AS "NetRenewalPreleasedBedSpaceCnt"
+        FROM "cumulative_community_pre_leasing_summary_student"
+        GROUP BY "Date"
+            , "CommunityName"
+            , "BedroomCnt"
+            , "BathroomCnt"
+        ) AS sus
+    GROUP BY "CommunityName"
+        , "UnitType"
+    )
+    , subjectbase
+AS (
+    SELECT "Date"
+        , "AcademicYearBeginDate"
+        , "AcademicYearEndDate"
+        , "WeekBeginDate"
+        , "WeekEndDate"
+        , "KeystoneReportingInd"
+        , "PropertyType"
+        , "TotalCommunityBeds"
+        , sc.name AS "College"
+        , prop.milesToClosestCampus AS "ProximitytoCampus"
+        , (
+            CASE 
+                WHEN TRIM(prop.yearBuilt) ~ '^[0-9]+$'
+                    THEN prop.yearBuilt::INTEGER
+                ELSE 0
+                END
+            ) AS "Vintage"
+        , "CGMgmtStatus"
+        , "PropertyCd"
+        , "CommunityName"
+        , CAST("BedroomCnt" AS VARCHAR) || 'BR/' || CAST("BathroomCnt" AS VARCHAR) || 'BA' AS "UnitType"
+        , "BedroomCnt"
+        , "BathroomCnt"
+        , "FloorplanName"
+        , COALESCE("NetPreleasedBedSpaceCnt", 0) AS "YTDTotalLeases"
+        , COALESCE("NetNewPreleasedBedSpaceCnt", 0) AS "YTDNewLeases"
+        , COALESCE("NetRenewalStayPreleasedBedSpaceCnt", 0) + COALESCE("NetRenewalTransferPreleasedBedSpaceCnt", 0) AS "YTDRenewalLeases"
+        , COALESCE("SignedMonthlyRentUSD", 0) AS "SignedMonthlyRentUSD"
+        , COALESCE("NewLeaseSignedMonthlyRentUSD", 0) AS "NewLeaseSignedMonthlyRentUSD"
+        , COALESCE("RenewalStayLeaseSignedMonthlyRentUSD", 0) + COALESCE("RenewalTransferLeaseSignedMonthlyRentUSD", 0) AS "RenewalLeaseSignedMonthlyRentUSD"
+    FROM "cumulative_community_pre_leasing_summary_student" ccl
+    LEFT JOIN "collegehousemarketcompetitormapping" mp
+        ON ccl."PropertyCd" = mp."Yardi ID"
+    LEFT JOIN "rpt_properties_cardinal" prop
+        ON mp."CH key" = prop.KEY
+    INNER JOIN "rpt_schools_cardinal" sc
+        ON ABS(SQRT(POW(69.1 * (prop.latitude - sc.latitude), 2) + POW(69.1 * (prop.longitude - sc.longitude) * COS(sc.latitude / 57.3), 2))) - prop.milesToClosestCampus < 0.05
+    )
+    , subjectaddon
+AS (
+    SELECT *
+        , "YTDTotalLeases" - LAG("YTDTotalLeases", 7) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "TotalWeeklyLeases"
+        , "YTDNewLeases" - LAG("YTDNewLeases", 7) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "NewWeeklyLeases"
+        , "SignedMonthlyRentUSD" - LAG("SignedMonthlyRentUSD", 7) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "TotalWeeklySignedRent"
+        , "NewLeaseSignedMonthlyRentUSD" - LAG("NewLeaseSignedMonthlyRentUSD", 7) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "NewWeeklySignedRent"
+        , "YTDTotalLeases" - LAG("YTDTotalLeases", 30) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "TotalTrailing30DayLeases"
+        , "YTDNewLeases" - LAG("YTDNewLeases", 30) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "NewTrailing30DayLeases"
+        , "SignedMonthlyRentUSD" - LAG("SignedMonthlyRentUSD", 30) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "TotalTrailing30DaySignedRent"
+        , "NewLeaseSignedMonthlyRentUSD" - LAG("NewLeaseSignedMonthlyRentUSD", 30) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "NewTrailing30DaySignedRent"
+        , "YTDTotalLeases" - LAG("YTDTotalLeases", 60) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "TotalTrailing60DayLeases"
+        , "YTDNewLeases" - LAG("YTDNewLeases", 60) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "NewTrailing60DayLeases"
+        , "SignedMonthlyRentUSD" - LAG("SignedMonthlyRentUSD", 60) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "TotalTrailing60DaySignedRent"
+        , "NewLeaseSignedMonthlyRentUSD" - LAG("NewLeaseSignedMonthlyRentUSD", 60) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "NewTrailing60DaySignedRent"
+        , "YTDTotalLeases" - LAG("YTDTotalLeases", 365) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "TotalYearlyLeaseVariance"
+        , "YTDNewLeases" - LAG("YTDNewLeases", 365) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "NewYearlyLeaseVariance"
+        , "SignedMonthlyRentUSD" - LAG("SignedMonthlyRentUSD", 365) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "TotalYearlySignedRentVariance"
+        , "NewLeaseSignedMonthlyRentUSD" - LAG("NewLeaseSignedMonthlyRentUSD", 365) OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "NewYearlySignedRentVariance"
+    FROM subjectbase
+    )
+    , askingrates
+AS (
+    SELECT "Date"
+        , "PropertyCd"
+        , "CommunityName"
+        , "FloorplanName"
+        , "CurrentAskingRate" - LAG("CurrentAskingRate", 7) OVER (
+            PARTITION BY "PropertyCd"
+            , "FloorplanName" ORDER BY "Date"
+            ) AS "WeeklyAskingRateChange"
+        , "CurrentAskingRate"
+        , RANK() OVER (
+            PARTITION BY "PropertyCd"
+            , "FloorplanName"
+            , "Date" ORDER BY "Date" DESC
+                , COALESCE("CurrentAskingRate", 0) DESC
+            ) AS "Rank"
+    FROM (
+        SELECT "as_of_date" AS "Date"
+            , MAX("external_id") OVER (
+                PARTITION BY SPLIT_PART("property_name", ' - Historical', 1) ORDER BY "as_of_date" DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS "PropertyCd"
+            , SPLIT_PART("property_name", ' - Historical', 1) AS "CommunityName"
+            , "floorplan_name" AS "FloorplanName"
+            , SUM("monthly_asking_rent" * "bed_count") / SUM("bed_count") AS "CurrentAskingRate"
+        FROM "gcp_entrata_reporting_cumulative_rental_rate_summary_vw"
+        GROUP BY "as_of_date"
+            , "external_id"
+            , "property_name"
+            , "floorplan_name"
+        ) AS pysub
+    ORDER BY "Date" DESC
+        , "PropertyCd" ASC
+        , "CommunityName" ASC
+        , "FloorplanName" ASC
+    )
+    ,
+    ----------- v Capturing all activity from pipeline (leads, tours, apps, leases) v -----------
+pipeline
+AS (
+    -- Generate a series of all dates (with no gaps) within the range of this data
+    WITH date_series AS (
+            SELECT DISTINCT "Date"
+            FROM "cumulative_community_pre_leasing_summary_student"
+            )
+        ,
+        -- 1. Ensure all dates are represented for each CommunityName and FloorplanName, since the window functions for trailing period calcs require that structure
+        -- 2. VwLeadLifecycle only includes records w/ activity, meaning that some communities and floorplans will naturally not have records for particular dates because there wasn't activity
+        -- 3. Cross join creates an array of all possible dates and community attributes, regardless of missing activity, allowing for more reliable and consistent joins elsewhere
+        complete_data AS (
+            SELECT ds."Date"
+                , cnfp."CommunityName"
+                , cnfp."PropertyCd"
+                , cnfp."FloorplanName"
+                , COALESCE(ll."DailyLeads", 0) AS "DailyLeads"
+                , COALESCE(tr."DailyTours", 0) AS "DailyTours"
+                , COALESCE(ap."DailyApps", 0) AS "DailyApps"
+                , COALESCE(la."DailyLeases", 0) AS "DailyLeases"
+            FROM date_series ds
+            CROSS JOIN (
+                SELECT DISTINCT "CommunityName"
+                    , "PropertyCd"
+                    , "FloorplanName"
+                FROM "vwleadlifecycle"
+                WHERE "LeaseType" = 'New'
+                ) cnfp
+            LEFT JOIN (
+                SELECT "GuestCardCreatedDate"::DATE AS "Date"
+                    , "CommunityName"
+                    , "PropertyCd"
+                    , "FloorplanName"
+                    , SUM(CASE 
+                            WHEN "GuestCardCreatedDate" IS NULL
+                                THEN 0
+                            ELSE 1
+                            END) AS "DailyLeads"
+                FROM "vwleadlifecycle"
+                WHERE "LeaseType" = 'New'
+                GROUP BY "Date"
+                    , "CommunityName"
+                    , "PropertyCd"
+                    , "FloorplanName"
+                ) ll
+                ON ds."Date" = ll."Date"
+                    AND cnfp."CommunityName" = ll."CommunityName"
+                    AND cnfp."PropertyCd" = ll."PropertyCd"
+                    AND cnfp."FloorplanName" = ll."FloorplanName"
+            LEFT JOIN (
+                SELECT "TourDate"::DATE AS "Date"
+                    , "CommunityName"
+                    , "PropertyCd"
+                    , "FloorplanName"
+                    , SUM(CASE 
+                            WHEN "TourDate" IS NULL
+                                THEN 0
+                            ELSE 1
+                            END) AS "DailyTours"
+                FROM "vwleadlifecycle"
+                WHERE "LeaseType" = 'New'
+                GROUP BY "Date"
+                    , "CommunityName"
+                    , "PropertyCd"
+                    , "FloorplanName"
+                ) tr
+                ON ds."Date" = tr."Date"
+                    AND cnfp."CommunityName" = tr."CommunityName"
+                    AND cnfp."PropertyCd" = tr."PropertyCd"
+                    AND cnfp."FloorplanName" = tr."FloorplanName"
+            LEFT JOIN (
+                SELECT "ApplicationApprovalDate"::DATE AS "Date"
+                    , "CommunityName"
+                    , "PropertyCd"
+                    , "FloorplanName"
+                    , SUM(CASE 
+                            WHEN "ApplicationApprovalDate" IS NULL
+                                THEN 0
+                            ELSE 1
+                            END) AS "DailyApps"
+                FROM "vwleadlifecycle"
+                WHERE "LeaseType" = 'New'
+                GROUP BY "Date"
+                    , "CommunityName"
+                    , "PropertyCd"
+                    , "FloorplanName"
+                ) ap
+                ON ds."Date" = ap."Date"
+                    AND cnfp."CommunityName" = ap."CommunityName"
+                    AND cnfp."PropertyCd" = ap."PropertyCd"
+                    AND cnfp."FloorplanName" = ap."FloorplanName"
+            LEFT JOIN (
+                SELECT "LeaseApprovalDate"::DATE AS "Date"
+                    , "CommunityName"
+                    , "PropertyCd"
+                    , "FloorplanName"
+                    , SUM(CASE 
+                            WHEN "LeaseApprovalDate" IS NULL
+                                THEN 0
+                            ELSE 1
+                            END) AS "DailyLeases"
+                FROM "vwleadlifecycle"
+                WHERE "LeaseType" = 'New'
+                GROUP BY "Date"
+                    , "CommunityName"
+                    , "PropertyCd"
+                    , "FloorplanName"
+                ) la
+                ON ds."Date" = la."Date"
+                    AND cnfp."CommunityName" = la."CommunityName"
+                    AND cnfp."PropertyCd" = la."PropertyCd"
+                    AND cnfp."FloorplanName" = la."FloorplanName"
+            )
+    -- Calculate Trailing Period Measures
+    SELECT "Date"
+        , DATE_TRUNC('week', "Date")::DATE AS "WeekBeginDate"
+        , "CommunityName"
+        , "PropertyCd"
+        , "FloorplanName"
+        , "DailyLeads"
+        , SUM("DailyLeads") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+            ) AS "Trailing7DayLeads"
+        , SUM("DailyLeads") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 27 PRECEDING AND CURRENT ROW
+            ) / 4 AS "Trailing4WeekAverageLeads"
+        , SUM("DailyLeads") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 59 PRECEDING AND 31 PRECEDING
+            ) / 4 AS "TrailingAdditional4WeekAverageLeads"
+        , SUM("DailyLeads") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 364 PRECEDING AND 357 PRECEDING
+            ) AS "PriorYearTrailing7DayLeads"
+        , "DailyTours"
+        , SUM("DailyTours") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+            ) AS "Trailing7DayTours"
+        , SUM("DailyTours") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 29 PRECEDING AND CURRENT ROW
+            ) / 4 AS "Trailing4WeekAverageTours"
+        , SUM("DailyTours") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 59 PRECEDING AND 31 PRECEDING
+            ) / 4 AS "TrailingAdditional4WeekAverageTours"
+        , SUM("DailyTours") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 364 PRECEDING AND 357 PRECEDING
+            ) AS "PriorYearTrailing7DayTours"
+        , "DailyApps"
+        , SUM("DailyApps") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+            ) AS "Trailing7DayApps"
+        , SUM("DailyApps") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 29 PRECEDING AND CURRENT ROW
+            ) / 4 AS "Trailing4WeekAverageApps"
+        , SUM("DailyApps") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 59 PRECEDING AND 31 PRECEDING
+            ) / 4 AS "TrailingAdditional4WeekAverageApps"
+        , SUM("DailyApps") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 364 PRECEDING AND 357 PRECEDING
+            ) AS "PriorYearTrailing7DayApps"
+        , "DailyLeases"
+        , SUM("DailyLeases") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+            ) AS "Trailing7DayLeases"
+        , SUM("DailyLeases") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 29 PRECEDING AND CURRENT ROW
+            ) / 4 AS "Trailing4WeekAverageLeases"
+        , SUM("DailyLeases") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 59 PRECEDING AND 31 PRECEDING
+            ) / 4 AS "TrailingAdditional4WeekAverageLeases"
+        , SUM("DailyLeases") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName" ORDER BY "Date" ROWS BETWEEN 364 PRECEDING AND 357 PRECEDING
+            ) AS "PriorYearTrailing7DayLeases"
+    FROM complete_data
+    )
+    , occupancy
+AS (
+    SELECT "Date"
+        , "ExternalID" AS "PropertyCd"
+        , "CommunityName"
+        , "FloorplanName"
+        , "RentableBedCnt"
+        , "SqFtPerBed"
+        , "OccupiedBedCnt"
+        , MAX("OccupiedBedCnt") OVER (
+            PARTITION BY "CommunityName"
+            , "FloorplanName"
+            ) AS "SustainableUnits"
+    FROM "community_floorplan_occupancy"
+    )
+    ,
+    ----- Adding market data --------
+market
+AS (
+    SELECT DATE_TRUNC('week', pr.updated)::DATE AS "AsOfDate"
+        , sc.name AS college
+        , CAST(pn.beds AS VARCHAR) || 'BR/' || CAST(pn.baths AS VARCHAR) || 'BA' AS "UnitType"
+        , SUM(pr.totalBeds) AS "TotalMarketUnitBeds"
+        , SUM(pn.areaSF * pr.totalbeds) / NULLIF(SUM(pr.totalbeds), 0) AS "AvgMarketUnitSqFt"
+        , SUM(pr.rate * pr.totalbeds) / NULLIF(SUM(pr.totalbeds), 0) AS "AvgMarketUnitRate"
+        , (SUM(pr.prelease * pr.totalbeds) / NULLIF(SUM(pr.totalbeds), 0)) * 100 AS "MarketUnitPrelease"
+        , (SUM(pr.occupancy * pr.totalbeds) / NULLIF(SUM(pr.totalbeds), 0)) * 100 AS "MarketUnitOccupancy"
+    FROM "rpt_plan_reports_cardinal" pr
+    INNER JOIN "rpt_plans_cardinal" pn
+        ON pr.planKey = pn.KEY
+    INNER JOIN "rpt_properties_cardinal" prop
+        ON pn.propertyKey = prop.KEY
+    LEFT JOIN "collegehousemarketcompetitormapping" mp
+        ON prop.KEY = mp."CH key"
+    LEFT JOIN "gcp_terrain_psql_reporting_trn_community_vw" trn
+        ON mp."Terrain Name" = trn."property_name_comp"
+    INNER JOIN "rpt_schools_cardinal" sc
+        ON ABS(SQRT(POW(69.1 * (prop.latitude - sc.latitude), 2) + POW(69.1 * (prop.longitude - sc.longitude) * COS(sc.latitude / 57.3), 2))) - prop.milesToClosestCampus < 0.05
+    WHERE (
+            CASE 
+                WHEN pr."is_from_cardinal" = 1
+                    THEN 1
+                WHEN pr."is_from_cardinal" = 0
+                    AND pr."isSyndicated" = 1
+                    THEN 1
+                ELSE 0
+                END
+            ) = 1
+    GROUP BY DATE_TRUNC('week', pr.updated)::DATE
+        , sc.name
+        , CAST(pn.beds AS VARCHAR) || 'BR/' || CAST(pn.baths AS VARCHAR) || 'BA'
+    )
+SELECT sa."Date"
+    , sa."AcademicYearBeginDate"
+    , sa."AcademicYearEndDate"
+    , sa."WeekBeginDate"
+    , sa."WeekEndDate"
+    , sa."KeystoneReportingInd"
+    , sa."PropertyType"
+    , sa."TotalCommunityBeds"
+    , sa."College"
+    , sa."ProximitytoCampus"
+    , sa."Vintage"
+    , sa."CGMgmtStatus"
+    , sa."PropertyCd"
+    , sa."CommunityName"
+    , sa."UnitType"
+    , sus."NewLeaseSustainableCap"
+    , sus."RenewalLeaseSustainableCap"
+    , mkt."TotalMarketUnitBeds"
+    , mkt."AvgMarketUnitSqFt"
+    , mkt."AvgMarketUnitRate"
+    , mkt."MarketUnitPrelease"
+    , mkt."MarketUnitOccupancy"
+    , SUM(sa."YTDTotalLeases") AS "YTDTotalLeases"
+    , SUM(sa."YTDNewLeases") AS "YTDNewLeases"
+    , SUM(sa."YTDRenewalLeases") AS "YTDRenewalLeases"
+    , SUM(sa."SignedMonthlyRentUSD") AS "SignedMonthlyRentUSD"
+    , SUM(sa."NewLeaseSignedMonthlyRentUSD") AS "NewLeaseSignedMonthlyRentUSD"
+    , SUM(sa."RenewalLeaseSignedMonthlyRentUSD") AS "RenewalLeaseSignedMonthlyRentUSD"
+    , SUM(sa."TotalWeeklyLeases") AS "TotalWeeklyLeases"
+    , SUM(sa."NewWeeklyLeases") AS "NewWeeklyLeases"
+    , SUM(sa."TotalWeeklySignedRent") AS "TotalWeeklySignedRent"
+    , SUM(sa."NewWeeklySignedRent") AS "NewWeeklySignedRent"
+    , SUM(sa."TotalTrailing30DayLeases") AS "TotalTrailing30DayLeases"
+    , SUM(sa."NewTrailing30DayLeases") AS "NewTrailing30DayLeases"
+    , SUM(sa."TotalTrailing30DaySignedRent") AS "TotalTrailing30DaySignedRent"
+    , SUM(sa."NewTrailing30DaySignedRent") AS "NewTrailing30DaySignedRent"
+    , SUM(sa."TotalTrailing60DayLeases") AS "TotalTrailing60DayLeases"
+    , SUM(sa."NewTrailing60DayLeases") AS "NewTrailing60DayLeases"
+    , SUM(sa."TotalTrailing60DaySignedRent") AS "TotalTrailing60DaySignedRent"
+    , SUM(sa."NewTrailing60DaySignedRent") AS "NewTrailing60DaySignedRent"
+    , SUM(sa."TotalYearlyLeaseVariance") AS "TotalYearlyLeaseVariance"
+    , SUM(sa."NewYearlyLeaseVariance") AS "NewYearlyLeaseVariance"
+    , SUM(sa."TotalYearlySignedRentVariance") AS "TotalYearlySignedRentVariance"
+    , SUM(sa."NewYearlySignedRentVariance") AS "NewYearlySignedRentVariance"
+    , AVG(ar."WeeklyAskingRateChange") AS "WeeklyAskingRateChange"
+    , AVG(ar."CurrentAskingRate") AS "CurrentAskingRate"
+    , SUM(pi."DailyLeads") AS "DailyLeads"
+    , SUM(pi."Trailing7DayLeads") AS "Trailing7DayLeads"
+    , SUM(pi."Trailing4WeekAverageLeads") AS "Trailing4WeekAverageLeads"
+    , SUM(pi."TrailingAdditional4WeekAverageLeads") AS "TrailingAdditional4WeekAverageLeads"
+    , SUM(pi."PriorYearTrailing7DayLeads") AS "PriorYearTrailing7DayLeads"
+    , SUM(pi."DailyTours") AS "DailyTours"
+    , SUM(pi."Trailing7DayTours") AS "Trailing7DayTours"
+    , SUM(pi."Trailing4WeekAverageTours") AS "Trailing4WeekAverageTours"
+    , SUM(pi."TrailingAdditional4WeekAverageTours") AS "TrailingAdditional4WeekAverageTours"
+    , SUM(pi."PriorYearTrailing7DayTours") AS "PriorYearTrailing7DayTours"
+    , SUM(pi."DailyApps") AS "DailyApps"
+    , SUM(pi."Trailing7DayApps") AS "Trailing7DayApps"
+    , SUM(pi."Trailing4WeekAverageApps") AS "Trailing4WeekAverageApps"
+    , SUM(pi."TrailingAdditional4WeekAverageApps") AS "TrailingAdditional4WeekAverageApps"
+    , SUM(pi."PriorYearTrailing7DayApps") AS "PriorYearTrailing7DayApps"
+    , SUM(pi."DailyLeases") AS "DailyLeases"
+    , SUM(pi."Trailing7DayLeases") AS "Trailing7DayLeases"
+    , SUM(pi."Trailing4WeekAverageLeases") AS "Trailing4WeekAverageLeases"
+    , SUM(pi."TrailingAdditional4WeekAverageLeases") AS "TrailingAdditional4WeekAverageLeases"
+    , SUM(pi."PriorYearTrailing7DayLeases") AS "PriorYearTrailing7DayLeases"
+    , SUM(oc."RentableBedCnt") AS "RentableBedCnt"
+    , AVG(oc."SqFtPerBed") AS "SqFtPerBed"
+    , SUM(oc."OccupiedBedCnt") AS "OccupiedBedCnt"
+FROM subjectaddon sa
+LEFT JOIN sustainablebeds sus
+    ON sa."CommunityName" = sus."CommunityName"
+        AND sa."UnitType" = sus."UnitType"
+LEFT JOIN askingrates ar
+    ON sa."Date" = ar."Date"
+        AND sa."PropertyCd" = ar."PropertyCd"
+        AND sa."FloorplanName" = ar."FloorplanName"
+        AND ar."Rank" = 1
+        AND sa."KeystoneReportingInd" = 'true'
+        AND sa."PropertyType" = 'Student'
+        AND sa."CGMgmtStatus" = 'Current'
+LEFT JOIN pipeline pi
+    ON sa."Date" = pi."Date"
+        AND sa."PropertyCd" = pi."PropertyCd"
+        AND sa."FloorplanName" = pi."FloorplanName"
+LEFT JOIN occupancy oc
+    ON sa."Date" = oc."Date"
+        AND sa."PropertyCd" = oc."PropertyCd"
+        AND sa."FloorplanName" = oc."FloorplanName"
+LEFT JOIN market mkt
+    ON DATE_TRUNC('week', sa."Date")::DATE = mkt."AsofDate"
+        AND sa."College" = mkt."College"
+        AND sa."UnitType" = mkt."UnitType"
+GROUP BY sa."Date"
+    , sa."AcademicYearBeginDate"
+    , sa."AcademicYearEndDate"
+    , sa."WeekBeginDate"
+    , sa."WeekEndDate"
+    , sa."KeystoneReportingInd"
+    , sa."PropertyType"
+    , sa."TotalCommunityBeds"
+    , sa."College"
+    , sa."ProximitytoCampus"
+    , sa."Vintage"
+    , sa."CGMgmtStatus"
+    , sa."PropertyCd"
+    , sa."CommunityName"
+    , sa."UnitType"
+    , sus."NewLeaseSustainableCap"
+    , sus."RenewalLeaseSustainableCap"
+    , mkt."TotalMarketUnitBeds"
+    , mkt."AvgMarketUnitSqFt"
+    , mkt."AvgMarketUnitRate"
+    , mkt."MarketUnitPrelease"
+    , mkt."MarketUnitOccupancy"
+ORDER BY sa."Date" DESC
+    , sa."CommunityName" ASC
+    , sa."UnitType" ASC
